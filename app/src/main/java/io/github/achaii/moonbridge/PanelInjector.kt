@@ -696,10 +696,19 @@ object PanelInjector {
 
     /** 撤掉我们的卡片，把藏起来的子 View 还原 */
     private fun hideOurs(g: ViewGroup) {
-        findOurCard(g)?.let {
-            try {
-                g.removeView(it)
-            } catch (t: Throwable) {
+        // ★ 性能：这个函数在「每一次 bindViewHolder（含所有滚动行）」里都会被调用。
+        //   以前无条件遍历子 View 并 removeView，列表一滚动就是每帧 O(n) 的视图操作，
+        //   弹窗期间 CPU 飙升/掉帧主要来自这里。没我们东西的格子直接返回。
+        val hadOurs = findOurCard(g) != null
+        val hadHidden = hiddenByUs.keys.any { it.parent === g }
+        if (!hadOurs && !hadHidden && !savedVis.containsKey(g)) return
+
+        if (hadOurs) {
+            findOurCard(g)?.let {
+                try {
+                    g.removeView(it)
+                } catch (t: Throwable) {
+                }
             }
         }
         for (i in 0 until g.childCount) {

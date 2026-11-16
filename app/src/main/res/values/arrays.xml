@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- LSPosed 读取的作用域：只需要设备空间这一个应用 -->
+    <!-- LSPosed 作用域：宿主卡片 + GMS（借它的常驻扫描能力提前发现耳机） -->
     <string-array name="xposed_scope">
         <item>com.heytap.mydevices</item>
+        <item>com.google.android.gms</item>
     </string-array>
 </resources>

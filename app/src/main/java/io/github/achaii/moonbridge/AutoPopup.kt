@@ -107,6 +107,75 @@ object AutoPopup {
         SettingsSync.install(app)
         registerBtReceiver(app, process)
         registerTestReceiver(app, process)
+        registerFoundReceiver(app, process)
+    }
+
+    /**
+     * 请 GMS 帮忙扫一次 BLE（GMS 常驻、有扫描权限、不受后台节流）。
+     *
+     * 顺带留一手：3.5 秒内没收到 GMS 回音（没装 GMS / 没勾作用域），
+     * 就在宿主进程里自己扫一次兜底 —— 命中率低总比完全没有强。
+     */
+    private fun requestScanFromGms(c: Context, classic: String?) {
+        try {
+            val i = Intent(GmsLeScan.ACT_REQ).apply {
+                setPackage("com.google.android.gms")
+                putExtra("classic", classic)
+                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            }
+            c.sendBroadcast(i)
+            log("已请求 GMS 扫描（classic=${classic ?: "?"}）")
+        } catch (t: Throwable) {
+            log("请求 GMS 扫描失败: ${t.javaClass.simpleName}")
+        }
+
+        // 兜底：GMS 没响应就在本进程扫
+        main.postDelayed({
+            if (LeCache.get(classic) != null) {
+                log("GMS 已回填缓存，跳过兜底扫描")
+                return@postDelayed
+            }
+            log("3.5s 内没等到 GMS 回音 → 宿主自己扫一次兜底")
+            LeDiscovery.start(c) { leAddr, leName ->
+                log("兜底扫描命中：$leAddr（${leName ?: "无名字"}）")
+                LeCache.put(c, classic, leAddr)
+                PanelInjector.prewarm(c, 0L)
+            }
+        }, 3_500L)
+    }
+
+    /** GMS 扫到地址后的回信 */
+    private fun registerFoundReceiver(app: Application, process: String) {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                try {
+                    val classic = i.getStringExtra("classic")
+                    val le = i.getStringExtra("le")
+                    val name = i.getStringExtra("name")
+                    if (le.isNullOrEmpty()) return
+                    log("GMS 推送 LE 地址：$le（classic=${classic ?: "?"} 设备=${name ?: "?"}）")
+                    LeCache.put(c, classic, le)
+                    PanelInjector.prewarm(c, 0L)
+                } catch (t: Throwable) {
+                    log("处理 GMS 推送失败: ${t.javaClass.simpleName}: ${t.message}")
+                }
+            }
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                Context::class.java.getMethod(
+                    "registerReceiver",
+                    BroadcastReceiver::class.java,
+                    IntentFilter::class.java,
+                    Int::class.javaPrimitiveType
+                ).invoke(app, r, IntentFilter(GmsLeScan.ACT_FOUND), 0x2)
+            } else {
+                app.registerReceiver(r, IntentFilter(GmsLeScan.ACT_FOUND))
+            }
+            log("已注册 GMS 扫描回信（process=$process）")
+        } catch (t: Throwable) {
+            log("注册 GMS 回信失败: ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     private fun registerBtReceiver(app: Application, process: String) {
@@ -139,14 +208,9 @@ object AutoPopup {
                     log("自动弹窗：不是水月雨（name=$name），跳过")
                     return
                 }
-                // ACL 连上 = 耳机已经在附近了 → 起一次 LE 扫描，抢在 A2DP 前面认出它
+                // ACL 连上 = 耳机已在附近 → 请 GMS 帮我们扫（它常驻、不受后台扫描节流）
                 if (act == "android.bluetooth.device.action.ACL_CONNECTED") {
-                    LeDiscovery.start(c) { leAddr, leName ->
-                        log("LE 提前发现：$leAddr（${leName ?: "无名字"}）→ 先建 GAIA")
-                        // 顺手把映射写进持久化缓存，下次就不用再扫了
-                        LeCache.put(c, addr, leAddr)
-                        PanelInjector.prewarm(c, 0L)
-                    }
+                    requestScanFromGms(c, addr)
                     return
                 }
                 if (!act.endsWith("CONNECTION_STATE_CHANGED")) return

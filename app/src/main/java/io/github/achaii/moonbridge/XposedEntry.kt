@@ -30,10 +30,10 @@ class XposedEntry : IXposedHookLoadPackage {
     companion object {
         private const val TAG = "[MoonBridge]"
 
-        /** 只在两个包里活动：宿主卡片与系统设置页 */
+        /** 只在两个包里活动：宿主卡片 + GMS（借它的扫描能力） */
         private val TARGET_PKGS = setOf(
             "com.heytap.mydevices",
-            "com.android.settings"
+            "com.google.android.gms"
         )
 
         /** 已 dump 过的 Activity 类，避免重复刷 */
@@ -52,6 +52,13 @@ class XposedEntry : IXposedHookLoadPackage {
         val pkg = lpparam.packageName
         if (pkg !in TARGET_PKGS) return
         log("=== 载入 $pkg (process=${lpparam.processName}) ===")
+
+        // GMS 里只做一件事：帮我们扫 BLE 广播（它常驻、有扫描权限、不受后台节流）。
+        // 不 hook GMS 任何业务类，只注册一个接收器 + 用系统 API 扫。
+        if (pkg == "com.google.android.gms") {
+            GmsLeScan.install(lpparam)
+            return
+        }
 
         hookAllActivityOnResume(lpparam)
         hookKnownClass(lpparam)
