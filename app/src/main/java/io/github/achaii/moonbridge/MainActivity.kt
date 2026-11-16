@@ -1,266 +1,197 @@
 package io.github.achaii.moonbridge
 
-import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
-import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Typeface
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.text.method.ScrollingMovementMethod
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
+import android.widget.ImageView
 import android.widget.TextView
-import java.util.concurrent.Executors
+import android.widget.Toast
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
 
 /**
- * 测试页：验证 Gaia over SPP 客户端能否真正控制 Golden Ages 2。
- * 这个页面不需要 Xposed，装上去就能用。
+ * 模块主界面。
+ *
+ * 风格参照 LSPosed Manager：顶部大标题 + 分组卡片 + 行内开关，配色走 Material 3（跟随系统深浅色）。
+ *
+ * 它自己不做任何注入 —— 只是「设置面板」：把用户的选择存在本应用，再通过广播同步给
+ * 跑在宿主进程里的注入端（见 SettingsStore / SettingsSync）。
  */
 class MainActivity : Activity() {
 
-    private val client = GaiaClient()
-    private val worker = Executors.newSingleThreadExecutor()
+    private lateinit var switchPopup: MaterialSwitch
+    private lateinit var tvIconState: TextView
+    private lateinit var ivIconPreview: ImageView
 
-    private lateinit var statusView: TextView
-    private lateinit var logView: TextView
+    /** 选好型号后，等系统图片选择器回来的那个 key */
+    private var pendingKey: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(24), dp(16), dp(24))
+        val version = runCatching { BuildConfig.VERSION_NAME }.getOrDefault("")
+        findViewById<MaterialToolbar>(R.id.toolbar).subtitle =
+            "${getString(R.string.app_subtitle)} · v$version"
+        findViewById<TextView>(R.id.tvVersionChip).text = "v$version"
+
+        switchPopup = findViewById(R.id.switchPopup)
+        tvIconState = findViewById(R.id.tvIconState)
+        ivIconPreview = findViewById(R.id.ivIconPreview)
+
+        // 先设值再挂监听，否则初始化会触发一次「用户改动」
+        switchPopup.isChecked = SettingsStore.autoPopup(this)
+        switchPopup.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setAutoPopup(this, checked)
+            toast(if (checked) "已开启自动弹窗" else "已关闭自动弹窗")
         }
 
-        statusView = TextView(this).apply {
-            text = "未连接"
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(12))
+        findViewById<View>(R.id.rowIcon).setOnClickListener { pickIconKey() }
+        findViewById<View>(R.id.rowGithub).setOnClickListener {
+            openUrl("https://github.com/a-chaii/MoonBridge")
         }
-        root.addView(statusView, matchWidth())
-
-        root.addView(buttonRow(
-            "选择设备" to { chooseDevice() },
-            "断开" to { doDisconnect() }
-        ))
-        root.addView(buttonRow(
-            "查版本" to { sendBasicVersion() },
-            "查电量" to { sendBattery() },
-            "查ANC" to { sendAncQuery() }
-        ))
-        root.addView(buttonRow(
-            "关闭" to { sendAnc(1) },
-            "降噪" to { sendAnc(2) },
-            "透传" to { sendAnc(4) }
-        ))
-        root.addView(buttonRow(
-            "抗风" to { sendAnc(3) },
-            "清空日志" to { logView.text = "" }
-        ))
-
-        logView = TextView(this).apply {
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-            movementMethod = ScrollingMovementMethod()
-            setPadding(0, dp(12), 0, 0)
+        findViewById<View>(R.id.rowLicense).setOnClickListener {
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.about_license)
+                .setMessage(
+                    "GNU General Public License v3.0\n\n" +
+                        "本程序为自由软件：你可以依据自由软件基金会发布的 GPL 第 3 版" +
+                        "（或你选择的任何更新版本）条款重新分发和/或修改它。\n\n" +
+                        "本程序按「现状」提供，不附带任何担保。完整条款见仓库中的 LICENSE 文件。"
+                )
+                .setPositiveButton(R.string.ok, null)
+                .show()
         }
-        root.addView(logView, matchWidth())
+        findViewById<View>(R.id.rowDisclaimer).setOnClickListener {
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.about_disclaimer)
+                .setMessage(
+                    "· 个人项目，非商业，无官方背书。\n" +
+                        "· 代码主要由 AI 辅助生成，未经过工程化审查。\n" +
+                        "· 只注入「设备空间」这一个应用，最坏情况是它打不开/闪退，关掉模块即恢复。\n" +
+                        "· 电量与档位来自耳机回报，仅供参考。\n" +
+                        "· 与 OPPO、水月雨官方无关，未获授权。"
+                )
+                .setPositiveButton(R.string.ok, null)
+                .show()
+        }
+        findViewById<View>(R.id.rowDebug).setOnClickListener {
+            startActivity(Intent(this, DebugActivity::class.java))
+        }
 
-        setContentView(ScrollView(this).apply { addView(root) })
+        // 每次进界面把当前设置推一次：注入端可能错过了上一次（当时它没在跑）
+        SettingsStore.pushSettings(this)
+        refreshIconRow()
+    }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 1)
+    override fun onResume() {
+        super.onResume()
+        refreshIconRow()
+    }
+
+    // ---------------- 头图 ----------------
+
+    private fun refreshIconRow() {
+        val key = SettingsStore.iconKey(this)
+        val f = if (key.isEmpty()) null else SettingsStore.localIconFile(this, key)
+        if (key.isNotEmpty() && f != null && f.exists()) {
+            tvIconState.text = "已设置：$key"
+            val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
+            if (bmp != null) {
+                ivIconPreview.setImageBitmap(bmp)
+                ivIconPreview.visibility = View.VISIBLE
             }
+        } else {
+            tvIconState.setText(R.string.feature_icon_none)
+            ivIconPreview.visibility = View.GONE
         }
-        log("就绪。点「选择设备」连耳机。")
     }
 
-    // ---------------- UI helpers ----------------
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
-    private fun matchWidth() = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-    )
-
-    private fun buttonRow(vararg items: Pair<String, () -> Unit>): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        for ((label, action) in items) {
-            val b = Button(this).apply {
-                text = label
-                textSize = 13f
-                isAllCaps = false
-                setOnClickListener { action() }
+    private fun pickIconKey() {
+        val keys = MoondropProfile.keys()
+        val current = SettingsStore.iconKey(this)
+        val items = keys.map { if (it == current) "$it（当前）" else it } + listOf("恢复内置图")
+        MaterialAlertDialogBuilder(this)
+            .setTitle("给哪个型号换头图")
+            .setItems(items.toTypedArray()) { _, which ->
+                if (which == keys.size) clearIcon() else {
+                    pendingKey = keys[which]
+                    openImagePicker()
+                }
             }
-            row.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        row.setPadding(0, dp(4), 0, dp(4))
-        return row
-    }
-
-    private fun log(msg: String) {
-        android.util.Log.i("MoonBridge", msg)
-        runOnUiThread {
-            logView.append(msg + "\n")
-        }
-    }
-
-    private fun setStatus(s: String) {
-        runOnUiThread { statusView.text = s }
-    }
-
-    private fun runBg(what: String, block: () -> String) {
-        worker.execute {
-            val t0 = System.currentTimeMillis()
-            try {
-                val r = block()
-                val ms = System.currentTimeMillis() - t0
-                runOnUiThread { logView.append("[$what ${ms}ms] $r\n") }
-            } catch (e: Throwable) {
-                val ms = System.currentTimeMillis() - t0
-                runOnUiThread { logView.append("[$what ${ms}ms] 异常: ${e.javaClass.simpleName}: ${e.message}\n") }
-            }
-        }
-    }
-
-    // ---------------- 动作 ----------------
-
-    private fun chooseDevice() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-        ) {
-            log("缺 BLUETOOTH_CONNECT 权限")
-            return
-        }
-        val devices = try {
-            client.candidateDevices()
-        } catch (e: Throwable) {
-            log("读取配对列表失败: $e")
-            return
-        }
-        if (devices.isEmpty()) {
-            log("没有已配对设备")
-            return
-        }
-        val labels = devices.map { "${it.name ?: "?"}\n${it.address}" }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("选择耳机")
-            .setItems(labels) { _, which -> connectTo(devices[which]) }
+            .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun connectTo(dev: android.bluetooth.BluetoothDevice) {
-        setStatus("连接中: ${dev.address}")
-        runBg("连接") {
-            client.connect(dev)
-            setStatus("已连接: ${client.deviceName} ${client.deviceAddress}")
-            "OK ${client.deviceName}"
-        }
-    }
-
-    private fun doDisconnect() {
-        runBg("断开") {
-            client.close()
-            setStatus("未连接")
-            "closed"
-        }
-    }
-
-    private fun ensureConnected(): Boolean {
-        if (!client.isConnected) {
-            log("请先连接耳机")
-            return false
-        }
-        return true
-    }
-
-    private fun showResult(tag: String, r: GaiaClient.Result) {
-        log("  TX→RX 原始: ${r.rawHex}")
-        if (r.frames.isEmpty()) {
-            log("  未能切出帧")
+    private fun openImagePicker() {
+        val intent = if (Build.VERSION.SDK_INT >= 33) {
+            Intent("android.provider.action.PICK_IMAGES").setType("image/*")
         } else {
-            for (f in r.frames) log("  ${GaiaProtocol.describe(f)}")
+            Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
+                .addCategory(Intent.CATEGORY_OPENABLE)
         }
-    }
-
-    private fun sendBasicVersion() {
-        if (!ensureConnected()) return
-        runBg("查版本") {
-            val frame = GaiaProtocol.build(GaiaProtocol.F_BASIC, GaiaProtocol.TYPE_CMD, 0)
-            log("  发送: ${client.hex(frame)}")
-            val r = client.request(frame)
-            showResult("查版本", r)
-            r.frames.filter { it.feature == GaiaProtocol.F_BASIC && it.type == GaiaProtocol.TYPE_RESP }
-                .joinToString("") { String(it.payload, Charsets.US_ASCII) }
-                .ifBlank { "(无响应)" }
-        }
-    }
-
-    private fun sendBattery() {
-        if (!ensureConnected()) return
-        runBg("查电量") {
-            val frame = GaiaProtocol.build(
-                GaiaProtocol.F_BATTERY, GaiaProtocol.TYPE_CMD, 1, byteArrayOf(0x01, 0x02)
-            )
-            log("  发送: ${client.hex(frame)}")
-            val r = client.request(frame)
-            showResult("查电量", r)
-            val resp = r.frames.firstOrNull { it.feature == GaiaProtocol.F_BATTERY }
-            resp?.let { "电量原始: ${it.payloadHex()}" } ?: "(无响应)"
-        }
-    }
-
-    private fun sendAncQuery() {
-        if (!ensureConnected()) return
-        runBg("查ANC") {
-            val frame = GaiaProtocol.build(
-                GaiaProtocol.F_ANC_V2, GaiaProtocol.TYPE_CMD, GaiaProtocol.ANC_GET_MODE
-            )
-            log("  发送: ${client.hex(frame)}")
-            val r = client.request(frame)
-            showResult("查ANC", r)
-            val resp = r.frames.firstOrNull { it.feature == GaiaProtocol.F_ANC_V2 }
-            resp?.let { "当前 ANC 模式 = ${it.payload.joinToString(",") { b -> (b.toInt() and 0xFF).toString() }}" }
-                ?: "(无响应)"
-        }
-    }
-
-    private fun sendAnc(mode: Int) {
-        if (!ensureConnected()) return
-        val name = when (mode) {
-            1 -> "关闭"; 2 -> "降噪"; 3 -> "抗风"; 4 -> "透传"; else -> "mode$mode"
-        }
-        runBg("设ANC=$name") {
-            val frame = GaiaProtocol.build(
-                GaiaProtocol.F_ANC_V2, GaiaProtocol.TYPE_CMD, GaiaProtocol.ANC_SET_MODE,
-                byteArrayOf(mode.toByte())
-            )
-            log("  发送: ${client.hex(frame)}")
-            val r = client.request(frame)
-            showResult("设ANC=$name", r)
-            val resp = r.frames.firstOrNull { it.feature == GaiaProtocol.F_ANC_V2 }
-            resp?.let { "回包 payload = ${it.payloadHex()}" } ?: "(无响应)"
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
         try {
-            client.close()
-        } catch (e: Exception) {
+            startActivityForResult(intent, REQ_PICK)
+        } catch (t: Throwable) {
+            try {
+                startActivityForResult(
+                    Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), REQ_PICK
+                )
+            } catch (t2: Throwable) {
+                toast("没有可用的图片选择器")
+            }
         }
-        worker.shutdownNow()
+    }
+
+    private fun clearIcon() {
+        val key = SettingsStore.iconKey(this)
+        if (key.isEmpty()) {
+            toast("当前没有自定义头图")
+            return
+        }
+        SettingsStore.localIconFile(this, key).delete()
+        SettingsStore.clearIconKey(this)
+        refreshIconRow()
+        toast("已恢复内置图（重启设备空间后生效）")
+    }
+
+    @Deprecated("纯 Activity 没有 registerForActivityResult，用旧式回调")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_PICK || resultCode != RESULT_OK) return
+        val uri: Uri = data?.data ?: return
+        val key = pendingKey ?: SettingsStore.iconKey(this)
+        if (key.isEmpty()) {
+            toast("没有选中型号")
+            return
+        }
+        val f = SettingsStore.pushHeadIcon(this, uri, key)
+        if (f == null) {
+            toast("读图失败，换一张试试")
+        } else {
+            refreshIconRow()
+            toast("已应用 $key 的头图（重启设备空间后生效）")
+        }
+    }
+
+    // ---------------- 小工具 ----------------
+
+    private fun openUrl(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (t: Throwable) {
+            toast("没有可用的浏览器")
+        }
+    }
+
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        private const val REQ_PICK = 1001
     }
 }

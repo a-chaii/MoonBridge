@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.achaii.moonbridge"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -37,6 +37,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    buildFeatures {
+        // 界面要显示版本号（BuildConfig.VERSION_NAME）
+        buildConfig = true
+    }
 }
 
 // Force use of ARM64 binaries for AAPT2 in Proot environment
@@ -57,6 +62,8 @@ dependencies {
     compileOnly("androidx.recyclerview:recyclerview:1.2.1")
 
     implementation(libs.androidx.core.ktx)
+    // Material 3 组件：整个模块界面都用这一套，跟随系统深浅色
+    implementation("com.google.android.material:material:1.12.0")
 
     testImplementation(libs.junit)
 }

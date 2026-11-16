@@ -102,6 +102,8 @@ object AutoPopup {
         if (installed) return
         installed = true
         appCtx = app
+        // 设置通道（自动弹窗开关 / 自定义头图）由模块 App 广播过来，落盘在宿主自己的 filesDir
+        SettingsSync.install(app)
         registerBtReceiver(app, process)
         registerTestReceiver(app, process)
     }
@@ -178,6 +180,11 @@ object AutoPopup {
     }
 
     private fun fire(mac: String, title: String, reason: String) {
+        // 设置里关掉就什么都不做。放在去重之前，免得白占一次去重窗口
+        if (!SettingsSync.autoPopup()) {
+            log("自动弹窗：已在模块设置里关闭，跳过（$reason）")
+            return
+        }
         if (!dedupeWindow(System.currentTimeMillis())) {
             log("自动弹窗：去重窗口内，跳过（$reason）")
             return

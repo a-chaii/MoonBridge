@@ -45,6 +45,9 @@ object MoondropProfile {
     /** 未命中任何档案时用的名义映射（协议名义编码：1=关 2=降 3=透 4=抗） */
     val DEFAULT = Profile("默认", intArrayOf(1, 2, 3, 4))
 
+    /** 所有已知型号的 key（顺序同档案表），给模块界面选型号用 */
+    fun keys(): List<String> = PROFILES.map { it.key }
+
     /** 按设备名（大写 contains）找档案；找不到返回 null */
     fun of(name: String?): Profile? {
         val n = name?.uppercase()?.trim()

@@ -709,25 +709,36 @@ object PanelInjector {
      */
     private fun applyIcon(root: View) {
         if (root.getTag(MARK_ICON) == true) return
-        // ★ 素材是梦回 2 的，别的型号一律不换（否则太空漫游/知更鸟也被套上这张图）
-        if (profile.key != ICON_PROFILE) {
-            if (iconSkipLoggedFor != profile.key) {
-                iconSkipLoggedFor = profile.key
-                log("跳过换图标：素材只对应「$ICON_PROFILE」（当前档案=${profile.key}）")
+
+        // ① 用户给这个型号设过自定义头图 → 优先用（文件在宿主 filesDir，同进程直接读）
+        val custom = SettingsSync.customIcon(profile.key)
+        val customBmp = custom?.let {
+            runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull()
+        }
+        // ② 没设过就只能用内置素材，而内置素材只有梦回 2 的一张，其他型号一律不动宿主原图
+        val bmp = customBmp ?: run {
+            if (profile.key != ICON_PROFILE) {
+                if (iconSkipLoggedFor != profile.key) {
+                    iconSkipLoggedFor = profile.key
+                    log("跳过换图标：内置素材只对应「$ICON_PROFILE」，当前档案=${profile.key}（可在模块里自定义头图）")
+                }
+                return
             }
+            iconBitmap()
+        }
+        if (bmp == null) {
+            log("图标数据不可用，跳过替换")
             return
         }
         // 先排查结构再取图：这样即使图有问题，日志里也有树可以看
         val all = ArrayList<ImageView>()
         collectImageViews(root, all, 0)
-        log("pos0 图标排查: ImageView=${all.size} 树=${describeTree(root, 0)}")
+        log(
+            "pos0 图标排查: ImageView=${all.size} 来源=${if (customBmp != null) "自定义" else "内置"} " +
+                "树=${describeTree(root, 0)}"
+        )
         if (all.isEmpty()) {
             log("pos0 没有 ImageView —— 图标可能是自定义 View 自己画的，换成 hook onDraw")
-            return
-        }
-        val bmp = iconBitmap()
-        if (bmp == null) {
-            log("图标数据不可用，跳过替换")
             return
         }
         // 面积最大的那个就是产品图（小的是箭头/角标之类）

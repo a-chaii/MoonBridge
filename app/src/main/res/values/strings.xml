@@ -1,3 +1,31 @@
 <resources>
     <string name="app_name">MoonBridge</string>
+    <string name="app_subtitle">月桥 · ColorOS 设备空间增强</string>
+
+    <string name="section_status">模块状态</string>
+    <string name="section_features">功能</string>
+    <string name="section_about">关于</string>
+    <string name="section_debug">调试</string>
+
+    <string name="status_hint">在 LSPosed 里启用本模块，作用域勾选「设备空间」（com.heytap.mydevices），然后重启设备或强制停止该应用。</string>
+    <string name="status_scope_title">作用域</string>
+    <string name="status_scope_value">设备空间 · com.heytap.mydevices</string>
+    <string name="status_version_title">版本</string>
+
+    <string name="feature_popup_title">连接后自动弹出卡片</string>
+    <string name="feature_popup_desc">耳机连上时自动打开它的设备详情卡片，省得手动点。</string>
+    <string name="feature_icon_title">自定义耳机头图</string>
+    <string name="feature_icon_desc">换掉卡片顶部那张产品图，只影响当前型号。</string>
+    <string name="feature_icon_none">未设置（使用内置图）</string>
+
+    <string name="about_github">GitHub 仓库</string>
+    <string name="about_license">开源许可证</string>
+    <string name="about_disclaimer">免责声明</string>
+    <string name="about_author">作者</string>
+
+    <string name="debug_console">GAIA 调试台</string>
+    <string name="debug_console_desc">手动连耳机、发指令、看原始回包。不依赖 LSPosed。</string>
+
+    <string name="dialog_license">GNU General Public License v3.0</string>
+    <string name="ok">好</string>
 </resources>

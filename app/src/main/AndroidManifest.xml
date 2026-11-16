@@ -18,7 +18,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.MyApplication"
+        android:theme="@style/Theme.MoonBridge"
         tools:targetApi="31">
 
         <!-- Xposed / LSPosed 模块声明 -->
@@ -33,7 +33,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.MyApplication">
+            android:theme="@style/Theme.MoonBridge">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -44,6 +44,11 @@
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".DebugActivity"
+            android:exported="false"
+            android:label="GAIA 调试台"
+            android:theme="@style/Theme.MoonBridge" />
     </application>
 
 </manifest>
