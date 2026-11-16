@@ -22,12 +22,15 @@ import java.security.MessageDigest
  *
  *   action  = com.oplus.mydevices.ACTION_DEVICE_DETAILED_PANEL
  *   target  = com.heytap.mydevices/com.oplus.mydevices.bluetooth.BlueToothDetailActivity
- *   extras  = device_connect_state=2 / device_type="bt-device" / model_id="sAlm"
- *             device_title="Moondrop Golden Ages 2" / device_secondary_type=2000
- *             mask=-1 / device_id=md5(mac) / device_mac_info="24:01:30:B5:58:22"
+ *   extras  = device_connect_state=2 / device_type="bt-device" / model_id=<宿主型号短码>
+ *             device_title=<设备名> / device_secondary_type=2000
+ *             mask=-1 / device_id=md5(mac) / device_mac_info=<经典蓝牙地址>
  *
- * 其中 device_id 已实测验证 = MD5("24:01:30:B5:58:22")（带冒号、原样小写），
- * 所以这里运行时算，不硬编码。
+ * ★ extras 的**键**是抓官方 Intent 得到的、固定不变；**值**全部运行时取：
+ *   - 地址：从触发我们的那条连接广播里取（同一副耳机不再写死）
+ *   - 标题：取系统里的蓝牙设备名（换耳机就跟着变）
+ *   - model_id：只有抓过官方 Intent 的型号才填（见 MODEL_IDS），其余省略让宿主自己查库
+ *   - device_id 已实测 = MD5(地址字符串，带冒号、原样小写)，所以运行时算。
  */
 object AutoPopup {
 
@@ -36,25 +39,20 @@ object AutoPopup {
     private const val PKG = "com.heytap.mydevices"
     private const val CLS_DETAIL = "com.oplus.mydevices.bluetooth.BlueToothDetailActivity"
     private const val ACT_DETAIL = "com.oplus.mydevices.ACTION_DEVICE_DETAILED_PANEL"
-
-    /** 设备标题（同官方 extra） */
-    private const val TITLE = "Moondrop Golden Ages 2"
-
-    /** 官方 extra 里的 model_id（原样照抄，不推测含义） */
-    private const val MODEL_ID = "sAlm"
-
-    /** 官方 extra 里的 device_secondary_type */
+    /** 官方 extra 里的 device_secondary_type（蓝牙耳机固定值） */
     private const val SECONDARY_TYPE = 2000
 
     /**
-     * 接受这几个地址（大小写不敏感）：
-     *  - 24:01:30:B5:58:22 —— 经典蓝牙地址，面板 extra 里的 device_mac_info 就是它
-     *  - 24:01:30:B5:0D:22 —— 我们 GAIA 直连用的 BLE 地址（双模耳机两个地址不同）
+     * 宿主自己的 model_id（就是官方 Intent 里那个短码）。
+     *
+     * ★ 这张表只能靠抓官方启动 Intent 得到，不能推断。
+     *   表里没有的型号就**不塞 model_id**，让宿主按 device_id / mac 自己去查它的设备库，
+     *   比瞎填一个错的短码安全得多。
      */
-    private val MACS = setOf(
-        "24:01:30:B5:58:22",
-        "24:01:30:B5:0D:22"
+    private val MODEL_IDS = mapOf(
+        "GOLDEN AGES 2" to "sAlm"
     )
+
 
     /** 连接广播到弹窗之间的等待：留一点时间给耳机把 A2DP 链路和卡片数据准备好 */
     private const val CONNECT_DELAY_MS = 900L
@@ -128,12 +126,19 @@ object AutoPopup {
                 val act = i.action ?: return
                 val dev = deviceOf(i)
                 val addr = dev?.address
+                val name = deviceName(dev)
                 val state = i.getIntExtra("android.bluetooth.profile.extra.STATE", -1)
-                log("蓝牙广播 $act addr=$addr state=$state")
-                if (addr == null || !MACS.any { it.equals(addr, true) }) return
+                log("蓝牙广播 $act addr=$addr name=$name state=$state")
+                if (addr == null) return
+                // ★ 门禁从「写死两个 MAC」换成「按名字判断是不是水月雨」：
+                //   换耳机、换型号、买新的都照样能弹；别人家的耳机不会被我们弹出来。
+                if (!MoondropProfile.isMoondrop(name)) {
+                    log("自动弹窗：不是水月雨（name=$name），跳过")
+                    return
+                }
                 // 带 state 的（A2DP / HFP）只认 2 = 已连接；ACL_CONNECTED 没有 state
                 if (state != -1 && state != 2) return
-                fire("广播 $act")
+                fire(addr, titleOf(name), "广播 $act")
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")
             }
@@ -149,7 +154,10 @@ object AutoPopup {
                     lastFire = 0L
                     log("自动弹窗：已重置去重计时")
                 }
-                fire("测试广播")
+                // 可以在广播里指定标题/地址，方便手头没有那副耳机时也能验证弹窗
+                val mac = i.getStringExtra("mac") ?: "00:00:00:00:00:00"
+                val title = i.getStringExtra("title") ?: "MOONDROP 测试设备"
+                fire(mac, title, "测试广播")
             }
         }
         try {
@@ -169,14 +177,14 @@ object AutoPopup {
         }
     }
 
-    private fun fire(reason: String) {
+    private fun fire(mac: String, title: String, reason: String) {
         if (!dedupeWindow(System.currentTimeMillis())) {
             log("自动弹窗：去重窗口内，跳过（$reason）")
             return
         }
         main.postDelayed({
             try {
-                startPanel(reason)
+                startPanel(mac, title, reason)
             } catch (t: Throwable) {
                 log("自动弹窗：启动失败 ${t.javaClass.simpleName}: ${t.message}")
             }
@@ -206,29 +214,34 @@ object AutoPopup {
         return true
     }
 
-    private fun startPanel(reason: String) {
+    private fun startPanel(mac: String, title: String, reason: String) {
         val c = appCtx
         if (c == null) {
             log("自动弹窗：没有 context，放弃")
             return
         }
-        val mac = "24:01:30:B5:58:22"
+        val profileKey = MoondropProfile.ofOrDefault(title).key
+        val modelId = MODEL_IDS[profileKey]
         val i = Intent().apply {
             setClassName(PKG, CLS_DETAIL)
             action = ACT_DETAIL
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("device_connect_state", 2)
             putExtra("device_type", "bt-device")
-            putExtra("model_id", MODEL_ID)
-            putExtra("device_title", TITLE)
+            putExtra("device_title", title)
             putExtra("device_secondary_type", SECONDARY_TYPE)
             putExtra("mask", -1)
             putExtra("device_id", md5Hex(mac))
             putExtra("device_mac_info", mac)
+            // 只有抓过官方 Intent 的型号才塞 model_id，其余留空让宿主自己查
+            if (modelId != null) putExtra("model_id", modelId)
         }
         try {
             c.startActivity(i)
-            log("自动弹窗：已启动 $CLS_DETAIL（$reason）")
+            log(
+                "自动弹窗：已启动 $CLS_DETAIL（$reason）" +
+                    " 标题=$title 档案=$profileKey model_id=${modelId ?: "(省略)"} mac=$mac"
+            )
         } catch (t: Throwable) {
             log("自动弹窗：startActivity 被拒 ${t.javaClass.simpleName}: ${t.message}")
         }
@@ -252,6 +265,19 @@ object AutoPopup {
             null
         }
     }
+
+    /** 设备名。name 在 Android 12+ 需要 BLUETOOTH_CONNECT：宿主有这个权限，拿不到就返回 null */
+    private fun deviceName(dev: android.bluetooth.BluetoothDevice?): String? {
+        if (dev == null) return null
+        return try {
+            dev.name?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /** 弹窗标题：优先用系统里看到的设备名，拿不到时给一个中性名，绝不编造成某个具体型号 */
+    private fun titleOf(name: String?): String = name ?: "蓝牙音频设备"
 
     private fun md5Hex(s: String): String {
         val d = MessageDigest.getInstance("MD5").digest(s.toByteArray())

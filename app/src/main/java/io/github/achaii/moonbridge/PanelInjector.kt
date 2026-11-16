@@ -202,6 +202,10 @@ object PanelInjector {
     @Volatile
     private var battPolling = false
 
+    /** 轮询任务本身。留着引用才能在卡片关掉时 removeCallbacks 掉 */
+    @Volatile
+    private var pollRunnable: Runnable? = null
+
     /** 空间音频开关状态：-1 未知 / 0 关 / 1 开 */
     @Volatile
     private var spatialOn = -1
@@ -307,6 +311,24 @@ object PanelInjector {
             log("✓ 已挂 ${cls.simpleName}#onNewIntent（读设备身份）")
         } catch (t: Throwable) {
             log("✗ 挂 onNewIntent 失败: ${t.javaClass.simpleName}: ${t.message}")
+        }
+        // 页面销毁 = 用户关掉了这张卡片 → 停轮询、断 GAIA，别在后台继续占连接
+        try {
+            XposedHelpers.findAndHookMethod(
+                cls, "onDestroy",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        try {
+                            shutdown("卡片页面关闭")
+                        } catch (t: Throwable) {
+                            log("收尾失败: ${t.javaClass.simpleName}: ${t.message}")
+                        }
+                    }
+                }
+            )
+            log("✓ 已挂 ${cls.simpleName}#onDestroy（收尾：停轮询 + 断连接）")
+        } catch (t: Throwable) {
+            log("✗ 挂 onDestroy 失败: ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 
@@ -1524,15 +1546,60 @@ object PanelInjector {
     private fun startBattPolling() {
         if (battPolling) return
         battPolling = true
-        main.postDelayed(object : Runnable {
+        val r = object : Runnable {
             override fun run() {
+                // 已经被停掉了就不要再续期（否则 removeCallbacks 之后还会被自己拉起来）
+                if (!battPolling) return
                 try {
                     if (client.isConnected) client.fetchBatteryLevels()
                 } catch (t: Throwable) {
                 }
+                if (!battPolling) return
                 main.postDelayed(this, BATTERY_POLL_MS)
             }
-        }, BATTERY_POLL_MS)
+        }
+        pollRunnable = r
+        main.postDelayed(r, BATTERY_POLL_MS)
+        log("电量轮询已启动（${BATTERY_POLL_MS / 1000}s）")
+    }
+
+    /** 停掉电量轮询。卡片关掉 / 换设备时必须调，否则会一直在后台占着 GATT */
+    private fun stopBattPolling(reason: String) {
+        if (!battPolling) return
+        battPolling = false
+        pollRunnable?.let { main.removeCallbacks(it) }
+        pollRunnable = null
+        log("电量轮询已停止（$reason）")
+    }
+
+    /**
+     * 卡片页面关掉时的收尾：停轮询 + 断 GAIA 连接 + 清掉所有视图引用。
+     *
+     * 之前这里什么都不做，导致离开卡片后 30s 轮询还在跑、GATT 连接一直挂着，
+     * 既耗电，也可能和官方 App 抢连接。
+     */
+    private fun shutdown(reason: String) {
+        stopBattPolling(reason)
+        try {
+            if (client.isConnected) {
+                client.close()
+                log("GAIA 连接已断开（$reason）")
+            }
+        } catch (t: Throwable) {
+            log("断开 GAIA 失败: ${t.javaClass.simpleName}: ${t.message}")
+        }
+        battText = null
+        lastChips = null
+        spatialChips = null
+        spatialSwitch = null
+        spatialOn = -1
+        trackMode = -1
+        battReported = false
+        leftOnline = false
+        rightOnline = false
+        gateLogged = false
+        hiddenByUs.clear()
+        savedVis.clear()
     }
 
     private fun toast(ctx: Context, msg: String) {
