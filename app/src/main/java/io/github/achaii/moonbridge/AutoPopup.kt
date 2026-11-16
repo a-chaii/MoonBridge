@@ -141,13 +141,15 @@ object AutoPopup {
                     log("自动弹窗：不是水月雨（name=$name），跳过")
                     return
                 }
-                // 带 state 的（A2DP / HFP）只认 2 = 已连接；ACL_CONNECTED 没有 state
-                if (state != -1 && state != 2) return
-                // 配对广播：只认 12 = BONDED
-                if (act.endsWith("BOND_STATE_CHANGED")) {
-                    val bond = i.getIntExtra("android.bluetooth.device.extra.BOND_STATE", -1)
-                    if (bond != 12) return
+                // ★ 只在「profile 已连接（state=2）」时弹。
+                //   之前的教训：ACL_CONNECTED 比 A2DP/HFP 建链早，那时宿主链路还没好，
+                //   我们伪造 device_connect_state=2 把面板叫起来，宿主会立刻自己收掉，
+                //   表现出来就是「弹了一下/根本没弹」。宁可晚 1 秒，也要弹得住。
+                if (!act.endsWith("CONNECTION_STATE_CHANGED")) {
+                    log("自动弹窗：$act 仅记录，不触发（等 profile 连接）")
+                    return
                 }
+                if (state != 2) return
                 fire(addr, titleOf(name), "广播 $act")
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")
