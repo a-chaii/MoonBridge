@@ -946,7 +946,7 @@ object PanelInjector {
         // ── 空间音频（FEATURE_SPATIAL_AUDIO = 0x12）：总开关 + 三档模式 ──
         //    只有 DC 档案里 hasSpatial = true 的型号（目前只有 GA2）才建这一块；
         //    别的型号根本没这功能，整行不出现，免得留一个点了没反应的开关。
-        if (profile.spatial) {
+        if (supportsSpatial()) {
         val spHeader = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1427,6 +1427,19 @@ object PanelInjector {
         handshakeDone = true
         log("握手完成 ${SystemClock.elapsedRealtime() - t0}ms，链路=${client.linkKind}")
 
+        // 握手第一步就是 GET_SUPPORTED_FEATURES，回包已经落到 client.features 里了。
+        // 能力与型号档案不一致时（例如档案说有空间音频、设备说没有），按设备说的重建卡片。
+        val feats = client.features
+        log(
+            "能力探测结果 features=[${feats.sorted().joinToString(",")}]" +
+                " 空间音频=${if (feats.isEmpty()) "未知" else Capabilities.hasSpatial(feats)}" +
+                " ANC路径=${Capabilities.ancPathOf(feats)}"
+        )
+        if (feats.isNotEmpty() && Capabilities.hasSpatial(feats) != profile.spatial) {
+            log("能力与档案不一致（档案空间音频=${profile.spatial}）→ 按设备自报重建卡片")
+            main.post { dropInjectedCards() }
+        }
+
         // ★ 官方 scheduleInitialQueries 的 1200ms 前置之后，第一件事就是查电量，
         //   紧接着 HeadsetDetectService 每 30 秒再刷一次。这里原样照做。
         try {
@@ -1534,6 +1547,17 @@ object PanelInjector {
     private fun singleEar(): Boolean {
         if (!battReported) return false
         return leftOnline != rightOnline
+    }
+
+    /**
+     * 该不该建「空间音频」那一块。
+     *
+     * 优先用**设备自报的能力位图**（F_SPATIAL = 0x12）；位图还没回来时退回型号档案。
+     * 这样即使型号名被改过、或买了固件不同批次的同型号，也不会出现「点了没反应」的开关。
+     */
+    private fun supportsSpatial(): Boolean {
+        val f = client.features
+        return if (f.isEmpty()) profile.spatial else Capabilities.hasSpatial(f)
     }
 
     /** 按单耳/双耳切换空间音频那一块的可点状态 */

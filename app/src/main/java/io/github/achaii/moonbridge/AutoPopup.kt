@@ -113,6 +113,9 @@ object AutoPopup {
             addAction("android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED")
             addAction("android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED")
             addAction("android.bluetooth.device.action.ACL_CONNECTED")
+            // A4（轻量版）：配对完成就触发 —— 这是「设备刚出现」最早能拿到的系统信号，
+            // 比 A2DP 建链早，链路还没就绪时弹窗反而更快。
+            addAction("android.bluetooth.device.action.BOND_STATE_CHANGED")
         }
         try {
             app.registerReceiver(btReceiver, filter)
@@ -140,6 +143,11 @@ object AutoPopup {
                 }
                 // 带 state 的（A2DP / HFP）只认 2 = 已连接；ACL_CONNECTED 没有 state
                 if (state != -1 && state != 2) return
+                // 配对广播：只认 12 = BONDED
+                if (act.endsWith("BOND_STATE_CHANGED")) {
+                    val bond = i.getIntExtra("android.bluetooth.device.extra.BOND_STATE", -1)
+                    if (bond != 12) return
+                }
                 fire(addr, titleOf(name), "广播 $act")
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")

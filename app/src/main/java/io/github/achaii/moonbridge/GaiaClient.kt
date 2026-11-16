@@ -156,9 +156,37 @@ class GaiaClient {
             parseAncMode(pdu)
             parseBatteryLevels(pdu)
             parseSpatial(pdu)
+            parseFeatures(pdu)
         } catch (t: Throwable) {
             log("解析回包失败: ${t.message}")
         }
+    }
+
+    /**
+     * 能力位图：BASIC(0x00) / GET_SUPPORTED_FEATURES(0x01) 的回包。
+     *
+     * 只做「累加」不做「覆盖」——固件可能分页回，也可能只在某些时机回一页。
+     */
+    private fun parseFeatures(pdu: ByteArray) {
+        if (pdu.size < 5) return
+        val vendor = ((pdu[0].toInt() and 0xFF) shl 8) or (pdu[1].toInt() and 0xFF)
+        if (vendor != 0x001D) return
+        val cmdValue = ((pdu[2].toInt() and 0xFF) shl 8) or (pdu[3].toInt() and 0xFF)
+        val feature = cmdValue shr 9
+        val type = (cmdValue shr 7) and 0x03
+        val cmd = cmdValue and 0x7F
+        if (type != GaiaProtocol.TYPE_RESP) return
+        if (feature != GaiaProtocol.F_BASIC || cmd != 0x01) return
+
+        val payload = pdu.copyOfRange(4, pdu.size)
+        val add = Capabilities.parseFeatures(payload)
+        if (add.isEmpty()) return
+        features = features + add
+        log(
+            "能力位图 features=[${features.sorted().joinToString(",")}]" +
+                " 空间音频=${Capabilities.hasSpatial(features)}" +
+                " ANC路径=${Capabilities.ancPathOf(features)}"
+        )
     }
 
     /**
@@ -308,6 +336,14 @@ class GaiaClient {
      */
     @Volatile
     var ancPath = 0
+
+    /**
+     * 设备自报的能力位图（GET_SUPPORTED_FEATURES 回包，累积）。
+     * 空集 = 还没收到（不是「什么都不支持」），调用方要区分这两种情况。
+     */
+    @Volatile
+    var features: Set<Int> = emptySet()
+        private set
 
     /** 阻塞连接（必须在工作线程调用）—— RFCOMM/SPP 兜底路径 */
     fun connect(device: BluetoothDevice) {

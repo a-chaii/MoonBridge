@@ -4,6 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:fitsSystemWindows="true"
     android:background="?android:attr/colorBackground">
 
     <!-- 顶部大标题，LSPosed Manager 同款结构：标题 + 版本副标题 -->
