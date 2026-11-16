@@ -1,7 +1,5 @@
 package io.github.achaii.moonbridge
 
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothProfile
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -15,6 +13,8 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.channels.FileLock
 import java.security.MessageDigest
 
 /**
@@ -59,12 +59,6 @@ object AutoPopup {
     /** 连接广播到弹窗之间的等待：留一点时间给耳机把 A2DP 链路和卡片数据准备好 */
     private const val CONNECT_DELAY_MS = 900L
 
-    /**
-     * 链路稳定观察窗：耳机刚连上时 profile 会抖（2→0→2），这期间弹出来会被宿主收掉。
-     * 1200ms 内没有任何掉线广播、且 A2DP/HFP 都在，才真的弹。
-     */
-    private const val STABLE_MS = 1200L
-
     /** 去重窗口：同一次连接里可能连着来好几条广播（ACL / A2DP / HFP） */
     private const val DEDUPE_MS = 20_000L
 
@@ -81,47 +75,14 @@ object AutoPopup {
     @Volatile
     private var lastFire = 0L
 
-    /** 待发的弹窗（等链路稳定）；任何 profile 掉线就取消 */
-    private var pendingFire: Runnable? = null
-
-    private fun cancelPendingFire() {
-        pendingFire?.let { try { main.removeCallbacks(it) } catch (t: Throwable) { } }
-        pendingFire = null
-    }
-
-    /** A2DP + HFP 都真的连上了才算稳定 */
-    private fun profilesReady(): Boolean {
-        return try {
-            val a = BluetoothAdapter.getDefaultAdapter() ?: return true
-            val a2 = a.getProfileConnectionState(BluetoothProfile.A2DP)
-            val hs = a.getProfileConnectionState(BluetoothProfile.HEADSET)
-            a2 == BluetoothProfile.STATE_CONNECTED && hs == BluetoothProfile.STATE_CONNECTED
-        } catch (t: Throwable) {
-            true
-        }
-    }
-
     /**
-     * ★ 延时弹 + 可取消。耳机刚连上时 profile 会抖（state 2 → 0 → 2），
-     *   这时候弹出来，宿主自己会因为掉线把页面收掉，用户就看到「闪一下没了」。
-     *   所以等 STABLE_MS 内没再抖、且两个 profile 都在，才真弹。
+     * 速度优先：不做抖动观察、不查 profile 状态，直接弹。
+     * 之前的「等 1.2 秒」是为了绕开「闪一下就没」，但那个现象的真身是
+     * **两个进程同时 startActivity（去重不是原子的）**，不是链路抖动——
+     * 所以去重改成文件锁之后，这里就不需要再等了。
      */
     private fun fireWhenStable(mac: String, title: String, reason: String) {
-        cancelPendingFire()
-        val r = Runnable {
-            try {
-                if (!profilesReady()) {
-                    log("自动弹窗：profile 还没稳（$reason），等下一次广播")
-                    return@Runnable
-                }
-                fire(mac, title, reason, 0L)
-            } catch (t: Throwable) {
-                log("自动弹窗：延时触发失败 ${t.javaClass.simpleName}: ${t.message}")
-            }
-        }
-        pendingFire = r
-        main.postDelayed(r, STABLE_MS)
-        log("自动弹窗：链路抖动观察 ${STABLE_MS}ms（$reason）")
+        fire(mac, title, reason, 0L)
     }
 
     /**
@@ -206,8 +167,11 @@ object AutoPopup {
                     if (le.isNullOrEmpty()) return
                     log("GMS 推送 LE 地址：$le（classic=${classic ?: "?"} 设备=${name ?: "?"}）")
                     LeCache.put(c, classic, le)
-                    // 注意：这里不弹窗。GMS 报地址时 A2DP 往往还没连稳，
-                    // 弹出来会被宿主按"设备掉线"收掉（0.6.1 实测：2.5s 闪一下、7s 才真弹）。
+                    // 第二重机会：ACL 广播里有时候 name 为空（我们没法判定是不是水月雨），
+                    // GMS 扫到的是带名字的广播，这时补一次弹窗。
+                    if (!classic.isNullOrEmpty()) {
+                        fire(classic, titleOf(name), "GMS 发现", 0L)
+                    }
                     PanelInjector.prewarm(c, 0L)
                 } catch (t: Throwable) {
                     log("处理 GMS 推送失败: ${t.javaClass.simpleName}: ${t.message}")
@@ -261,9 +225,10 @@ object AutoPopup {
                     log("自动弹窗：不是水月雨（name=$name），跳过")
                     return
                 }
-                // ACL 连上 = 耳机已在附近 → 请 GMS 帮我们扫（它常驻、不受后台扫描节流）
+                // ACL 连上 = 链路层已经在，立刻弹窗（速度优先），扫描和预热放到后面做
                 if (act == "android.bluetooth.device.action.ACL_CONNECTED") {
                     LeCache.attach(c)
+                    fire(addr, titleOf(name), "ACL 连接", 0L)
                     when {
                         // 这条就是之前扫到的 LE 地址，不用再扫
                         LeCache.isKnownLe(addr) -> log("ACL($addr) 是已知 LE 地址，不再重复扫描")
@@ -277,13 +242,8 @@ object AutoPopup {
                     return
                 }
                 if (!act.endsWith("CONNECTION_STATE_CHANGED")) return
-                if (state != 2) {
-                    // 链路在抖（2 → 0 → 2）。这时候别弹，弹了宿主也会自己收掉
-                    cancelPendingFire()
-                    log("自动弹窗：链路抖动 state=$state，取消待弹（$act）")
-                    return
-                }
-                fireWhenStable(addr, titleOf(name), "广播 $act")
+                if (state != 2) return
+                fire(addr, titleOf(name), "广播 $act", 0L)
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")
             }
@@ -342,26 +302,49 @@ object AutoPopup {
     }
 
     /**
-     * 跨进程去重：两个进程各注册了一份广播，谁先来谁写时间戳，另一个看到就跳过。
-     * 用真实时间而不是 elapsedRealtime，因为要跨进程共享。
+     * 跨进程去重：两个进程（主进程 / :cards）各注册了一份广播，谁先来谁写时间戳。
+     * ★ 必须是原子的：之前是「读文件 → 判断 → 写文件」，两个进程同时读到的都是旧值，
+     *   于是两边都 startActivity —— 这就是「2.5 秒弹出来、卡一下又没了」的真身
+     *   （第二个 Activity 实例起来把前一个顶掉了）。现在改用文件锁，同一时刻只放一个进程过去。
      */
     private fun dedupeWindow(now: Long): Boolean {
         val ctx = appCtx ?: return false
-        if (now - lastFire < DEDUPE_MS) return false
+        // 同进程内的极短防抖（广播常常连着两条）
+        if (now - lastFire < 300L) return false
         val f = File(ctx.filesDir, "moonpanel_popup.ts")
+        var raf: RandomAccessFile? = null
+        var lock: FileLock? = null
         try {
-            if (f.exists()) {
-                val prev = f.readText().trim().toLongOrNull() ?: 0L
-                if (now - prev < DEDUPE_MS) return false
+            raf = RandomAccessFile(f, "rw")
+            lock = raf.channel.tryLock()
+            if (lock == null) {
+                log("自动弹窗：另一个进程正在处理，跳过")
+                return false
             }
+            val len = raf.length()
+            val prev = if (len > 0L && len < 64L) {
+                val b = ByteArray(len.toInt())
+                raf.seek(0L)
+                raf.readFully(b)
+                String(b, Charsets.UTF_8).trim().toLongOrNull() ?: 0L
+            } else {
+                0L
+            }
+            if (now - prev < DEDUPE_MS) return false
+            raf.seek(0L)
+            raf.setLength(0L)
+            raf.write(now.toString().toByteArray())
+            lastFire = now
+            return true
         } catch (t: Throwable) {
+            // 拿不到锁（OverlappingFileLockException / 文件系统不支持）→ 保守跳过，
+            // 宁可少弹一次也不要弹出两个窗口互相顶
+            log("自动弹窗：去重锁异常 ${t.javaClass.simpleName}，跳过")
+            return false
+        } finally {
+            try { lock?.release() } catch (t: Throwable) { }
+            try { raf?.close() } catch (t: Throwable) { }
         }
-        lastFire = now
-        try {
-            f.writeText(now.toString())
-        } catch (t: Throwable) {
-        }
-        return true
     }
 
     private fun startPanel(mac: String, title: String, reason: String) {
