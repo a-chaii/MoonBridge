@@ -1,0 +1,33 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# 构建产物
+**/build/
+*.apk
+*.aab
+
+# Kotlin / IDE
+.kotlin/
+
+# 另一个独立工程（卡片修改器），不随本仓库发布
+/cardmodder/
+
+# 本地工具产物与备份，不公开
+/.backup/
+/.operit
+
+# 上游项目源码副本与临时笔记（仅本地参考，禁止提交）
+/docs/protocol/

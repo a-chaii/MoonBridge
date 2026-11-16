@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 读取的作用域；第一版只放通用蓝牙详情页 -->
+    <string-array name="xposed_scope">
+        <item>com.heytap.mydevices</item>
+    </string-array>
+</resources>
