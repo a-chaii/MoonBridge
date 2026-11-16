@@ -97,6 +97,7 @@ object AutoPopup {
         }
     }
 
+
     @Synchronized
     private fun bind(app: Application, process: String) {
         if (installed) return
@@ -106,42 +107,6 @@ object AutoPopup {
         SettingsSync.install(app)
         registerBtReceiver(app, process)
         registerTestReceiver(app, process)
-        registerFastPairReceiver(app, process)
-    }
-
-    /**
-     * GMS 侧发现 Fast Pair 半屏时发来的「提前信号」。
-     *
-     * 收到后不做弹窗（那时 A2DP 还没连上，弹了宿主也会收掉），
-     * 只是提前把 GAIA 链路和握手做完 —— 卡片真打开时数据就是现成的。
-     */
-    private fun registerFastPairReceiver(app: Application, process: String) {
-        val r = object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) {
-                try {
-                    val name = i.getStringExtra("name")
-                    log("收到 FASTPAIR_SEEN（设备=${name ?: "未知"}），准备提前建链")
-                    PanelInjector.prewarm(c, FastPairSignal.prewarmDelayMs())
-                } catch (t: Throwable) {
-                    log("FASTPAIR_SEEN 处理失败: ${t.javaClass.simpleName}: ${t.message}")
-                }
-            }
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                Context::class.java.getMethod(
-                    "registerReceiver",
-                    BroadcastReceiver::class.java,
-                    IntentFilter::class.java,
-                    Int::class.javaPrimitiveType
-                ).invoke(app, r, IntentFilter(FastPairSignal.ACT_SEEN), 0x2)
-            } else {
-                app.registerReceiver(r, IntentFilter(FastPairSignal.ACT_SEEN))
-            }
-            log("自动弹窗：已注册 FASTPAIR_SEEN（process=$process）")
-        } catch (t: Throwable) {
-            log("注册 FASTPAIR_SEEN 失败: ${t.javaClass.simpleName}: ${t.message}")
-        }
     }
 
     private fun registerBtReceiver(app: Application, process: String) {
@@ -174,16 +139,19 @@ object AutoPopup {
                     log("自动弹窗：不是水月雨（name=$name），跳过")
                     return
                 }
-                // ★ 只在「profile 已连接（state=2）」时弹。
-                //   之前的教训：ACL_CONNECTED 比 A2DP/HFP 建链早，那时宿主链路还没好，
-                //   我们伪造 device_connect_state=2 把面板叫起来，宿主会立刻自己收掉，
-                //   表现出来就是「弹了一下/根本没弹」。宁可晚 1 秒，也要弹得住。
-                if (!act.endsWith("CONNECTION_STATE_CHANGED")) {
-                    log("自动弹窗：$act 仅记录，不触发（等 profile 连接）")
+                // ACL 连上 = 耳机已经在附近了 → 起一次 LE 扫描，抢在 A2DP 前面认出它
+                if (act == "android.bluetooth.device.action.ACL_CONNECTED") {
+                    LeDiscovery.start(c) { leAddr, leName ->
+                        log("LE 提前发现：$leAddr（${leName ?: "无名字"}）→ 先建 GAIA")
+                        PanelInjector.prewarm(c, 0L)
+                    }
                     return
                 }
+                if (!act.endsWith("CONNECTION_STATE_CHANGED")) return
                 if (state != 2) return
-                fire(addr, titleOf(name), "广播 $act")
+                // 刚刚扫到过设备（8 秒内）说明链路早就热了，不用再等 900ms
+                val delay = if (LeDiscovery.freshHit()) 0L else CONNECT_DELAY_MS
+                fire(addr, titleOf(name), "广播 $act", delay)
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")
             }
@@ -222,7 +190,7 @@ object AutoPopup {
         }
     }
 
-    private fun fire(mac: String, title: String, reason: String) {
+    private fun fire(mac: String, title: String, reason: String, delayMs: Long = CONNECT_DELAY_MS) {
         // 设置里关掉就什么都不做。放在去重之前，免得白占一次去重窗口
         if (!SettingsSync.autoPopup()) {
             log("自动弹窗：已在模块设置里关闭，跳过（$reason）")
@@ -238,7 +206,7 @@ object AutoPopup {
             } catch (t: Throwable) {
                 log("自动弹窗：启动失败 ${t.javaClass.simpleName}: ${t.message}")
             }
-        }, CONNECT_DELAY_MS)
+        }, delayMs)
     }
 
     /**
