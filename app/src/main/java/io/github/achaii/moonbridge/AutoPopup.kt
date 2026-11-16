@@ -155,6 +155,11 @@ object AutoPopup {
                     if (le.isNullOrEmpty()) return
                     log("GMS 推送 LE 地址：$le（classic=${classic ?: "?"} 设备=${name ?: "?"}）")
                     LeCache.put(c, classic, le)
+                    // ★ 拿到地址就弹：此时经典链路已由 ACL 建立，A2DP 可能还差 1~2 秒，
+                    //   但我们已经有 LE 地址+缓存，足够把卡片叫起来（prewarm 会补齐数据）。
+                    if (!classic.isNullOrEmpty()) {
+                        fire(classic, titleOf(name), "GMS 提前发现", 150L)
+                    }
                     PanelInjector.prewarm(c, 0L)
                 } catch (t: Throwable) {
                     log("处理 GMS 推送失败: ${t.javaClass.simpleName}: ${t.message}")
@@ -210,7 +215,17 @@ object AutoPopup {
                 }
                 // ACL 连上 = 耳机已在附近 → 请 GMS 帮我们扫（它常驻、不受后台扫描节流）
                 if (act == "android.bluetooth.device.action.ACL_CONNECTED") {
-                    requestScanFromGms(c, addr)
+                    LeCache.attach(c)
+                    when {
+                        // 这条就是之前扫到的 LE 地址，不用再扫
+                        LeCache.isKnownLe(addr) -> log("ACL($addr) 是已知 LE 地址，不再重复扫描")
+                        // 缓存里已有映射 → 直接预热，连扫描都省了
+                        LeCache.get(addr) != null -> {
+                            log("缓存命中：$addr → ${LeCache.get(addr)}，直接预热")
+                            PanelInjector.prewarm(c, 0L)
+                        }
+                        else -> requestScanFromGms(c, addr)
+                    }
                     return
                 }
                 if (!act.endsWith("CONNECTION_STATE_CHANGED")) return

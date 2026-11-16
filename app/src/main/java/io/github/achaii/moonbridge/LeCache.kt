@@ -40,6 +40,17 @@ object LeCache {
         }
     }
 
+    /** 这个地址本身是不是某个已缓存的 LE 地址（用来忽略重复的 LE 广播，别再扫一次） */
+    fun isKnownLe(addr: String?): Boolean {
+        val c = app ?: return false
+        if (addr.isNullOrEmpty()) return false
+        return try {
+            readAll(c).values.any { it.equals(addr, true) }
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
     fun put(ctx: Context?, classicAddr: String?, leAddr: String?) {
         val c = ctx?.applicationContext ?: app ?: return
         if (app == null) app = c
