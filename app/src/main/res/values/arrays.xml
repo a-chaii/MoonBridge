@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- LSPosed 读取的作用域；第一版只放通用蓝牙详情页 -->
+    <!-- LSPosed 读取的作用域 -->
     <string-array name="xposed_scope">
+        <!-- 宿主：设备空间卡片 -->
         <item>com.heytap.mydevices</item>
+        <!-- Fast Pair 提前信号（只看半屏出现的时机，不碰 GMS 的 UI） -->
+        <item>com.google.android.gms</item>
     </string-array>
 </resources>

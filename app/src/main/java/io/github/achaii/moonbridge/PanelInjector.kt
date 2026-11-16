@@ -231,6 +231,38 @@ object PanelInjector {
     // 安装
     // ------------------------------------------------------------------
 
+    /**
+     * 提前建链（A4 的落点）。
+     *
+     * GMS 的 Fast Pair 半屏出现时（设备刚被发现、A2DP 还没建链），宿主侧会收到广播，
+     * 这里就抢先把 GAIA 链路和握手做完。等卡片真的被打开时，电量/档位已经是现成的，
+     * 不用再等 1~2 秒的握手。
+     *
+     * 幂等：已连上就直接返回；握手本身也靠 handshakeDone 去重。
+     */
+    fun prewarm(ctx: Context, delayMs: Long = 0L) {
+        main.postDelayed({
+            worker.execute {
+                try {
+                    if (client.isConnected) {
+                        log("prewarm：链路已在，跳过")
+                        return@execute
+                    }
+                    log("prewarm：开始提前建链")
+                    val t0 = SystemClock.elapsedRealtime()
+                    if (!ensureLink(ctx)) {
+                        log("prewarm：建链失败（设备可能还没配对完）")
+                        return@execute
+                    }
+                    log("prewarm：链路就绪 ${SystemClock.elapsedRealtime() - t0}ms，开始握手")
+                    handshake()
+                } catch (t: Throwable) {
+                    log("prewarm 异常: ${t.javaClass.simpleName}: ${t.message}")
+                }
+            }
+        }, delayMs)
+    }
+
     fun install(lpparam: XC_LoadPackage.LoadPackageParam) {
         val loader = lpparam.classLoader
         val rvCls = loadClass("androidx.recyclerview.widget.RecyclerView", loader)

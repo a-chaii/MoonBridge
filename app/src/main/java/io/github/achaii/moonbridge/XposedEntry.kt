@@ -30,10 +30,11 @@ class XposedEntry : IXposedHookLoadPackage {
     companion object {
         private const val TAG = "[MoonBridge]"
 
-        /** 只在这几个包里活动；com.android.settings 是为了那个设备详情页 */
+        /** 只在几个包里活动：宿主卡片、系统设置页、GMS（Fast Pair 提前信号） */
         private val TARGET_PKGS = setOf(
             "com.heytap.mydevices",
-            "com.android.settings"
+            "com.android.settings",
+            "com.google.android.gms"
         )
 
         /** 已 dump 过的 Activity 类，避免重复刷 */
@@ -52,6 +53,13 @@ class XposedEntry : IXposedHookLoadPackage {
         val pkg = lpparam.packageName
         if (pkg !in TARGET_PKGS) return
         log("=== 载入 $pkg (process=${lpparam.processName}) ===")
+
+        // GMS 里只干一件事：盯 Fast Pair 半屏出现的时机，拿到「设备来了」的提前信号。
+        // 不做 Activity dump、不注入面板，免得在 GMS 里留一堆无用钩子。
+        if (pkg == "com.google.android.gms") {
+            FastPairSignal.install(lpparam)
+            return
+        }
 
         hookAllActivityOnResume(lpparam)
         hookKnownClass(lpparam)

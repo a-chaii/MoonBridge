@@ -106,6 +106,42 @@ object AutoPopup {
         SettingsSync.install(app)
         registerBtReceiver(app, process)
         registerTestReceiver(app, process)
+        registerFastPairReceiver(app, process)
+    }
+
+    /**
+     * GMS 侧发现 Fast Pair 半屏时发来的「提前信号」。
+     *
+     * 收到后不做弹窗（那时 A2DP 还没连上，弹了宿主也会收掉），
+     * 只是提前把 GAIA 链路和握手做完 —— 卡片真打开时数据就是现成的。
+     */
+    private fun registerFastPairReceiver(app: Application, process: String) {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                try {
+                    val name = i.getStringExtra("name")
+                    log("收到 FASTPAIR_SEEN（设备=${name ?: "未知"}），准备提前建链")
+                    PanelInjector.prewarm(c, FastPairSignal.prewarmDelayMs())
+                } catch (t: Throwable) {
+                    log("FASTPAIR_SEEN 处理失败: ${t.javaClass.simpleName}: ${t.message}")
+                }
+            }
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                Context::class.java.getMethod(
+                    "registerReceiver",
+                    BroadcastReceiver::class.java,
+                    IntentFilter::class.java,
+                    Int::class.javaPrimitiveType
+                ).invoke(app, r, IntentFilter(FastPairSignal.ACT_SEEN), 0x2)
+            } else {
+                app.registerReceiver(r, IntentFilter(FastPairSignal.ACT_SEEN))
+            }
+            log("自动弹窗：已注册 FASTPAIR_SEEN（process=$process）")
+        } catch (t: Throwable) {
+            log("注册 FASTPAIR_SEEN 失败: ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     private fun registerBtReceiver(app: Application, process: String) {
@@ -113,9 +149,6 @@ object AutoPopup {
             addAction("android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED")
             addAction("android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED")
             addAction("android.bluetooth.device.action.ACL_CONNECTED")
-            // A4（轻量版）：配对完成就触发 —— 这是「设备刚出现」最早能拿到的系统信号，
-            // 比 A2DP 建链早，链路还没就绪时弹窗反而更快。
-            addAction("android.bluetooth.device.action.BOND_STATE_CHANGED")
         }
         try {
             app.registerReceiver(btReceiver, filter)
