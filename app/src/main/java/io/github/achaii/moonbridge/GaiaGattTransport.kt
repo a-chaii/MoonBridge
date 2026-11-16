@@ -141,6 +141,10 @@ class GaiaGattTransport(
             // ③ 上次连上的缓存
             add(cachedLeAddress)
 
+            // ③.5 持久化缓存（跨重启有效）—— 上游「生命闭环」那一环：
+            //      连成功一次就把 经典→LE 的对应写盘，之后直接拿来用，跳过扫描。
+            add(LeCache.get(try { device.address } catch (t: Throwable) { null }))
+
             // ④ 官方 App 缓存的 LE 地址
             add(KNOWN_LE_ADDRESS)
 

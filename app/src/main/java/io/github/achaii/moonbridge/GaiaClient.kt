@@ -114,6 +114,8 @@ class GaiaClient {
      */
     fun connectGatt(ctx: Context, device: BluetoothDevice): Boolean {
         close()
+        // 持久化缓存要在解析候选之前就绪（命中就跳过扫描）
+        LeCache.attach(ctx)
         val t = GaiaGattTransport(
             ctx,
             onPacket = { pdu -> onRx(pdu) },
@@ -136,11 +138,15 @@ class GaiaClient {
                     "?"
                 }
                 GaiaGattTransport.cachedLeAddress = le.address
+                // 写回持久化缓存：下次连接直接命中，跳过扫描（上游的「秒连」闭环）
+                LeCache.put(ctx, try { device.address } catch (e: Throwable) { null }, le.address)
                 return true
             }
             log("GATT 连接 ${le.address} 失败，换下一个候选")
         }
         log("所有 LE 候选都失败")
+        // 全部失败说明缓存里的地址已经不对了（换设备 / 固件重置）→ 作废，下次重新扫
+        LeCache.invalidate(ctx, try { device.address } catch (e: Throwable) { null })
         t.close()
         return false
     }

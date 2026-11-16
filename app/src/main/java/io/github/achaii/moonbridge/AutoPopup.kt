@@ -143,6 +143,8 @@ object AutoPopup {
                 if (act == "android.bluetooth.device.action.ACL_CONNECTED") {
                     LeDiscovery.start(c) { leAddr, leName ->
                         log("LE 提前发现：$leAddr（${leName ?: "无名字"}）→ 先建 GAIA")
+                        // 顺手把映射写进持久化缓存，下次就不用再扫了
+                        LeCache.put(c, addr, leAddr)
                         PanelInjector.prewarm(c, 0L)
                     }
                     return
