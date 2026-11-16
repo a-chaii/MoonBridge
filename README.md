@@ -45,7 +45,7 @@
 ## 从源码构建
 
 ```bash
-git clone https://github.com/a-chaii/moonbridge.git
+git clone https://github.com/a-chaii/MoonBridge.git
 cd moonbridge
 ./gradlew assembleDebug
 ```
