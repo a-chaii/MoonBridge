@@ -1,5 +1,7 @@
 package io.github.achaii.moonbridge
 
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothProfile
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -57,6 +59,12 @@ object AutoPopup {
     /** 连接广播到弹窗之间的等待：留一点时间给耳机把 A2DP 链路和卡片数据准备好 */
     private const val CONNECT_DELAY_MS = 900L
 
+    /**
+     * 链路稳定观察窗：耳机刚连上时 profile 会抖（2→0→2），这期间弹出来会被宿主收掉。
+     * 1200ms 内没有任何掉线广播、且 A2DP/HFP 都在，才真的弹。
+     */
+    private const val STABLE_MS = 1200L
+
     /** 去重窗口：同一次连接里可能连着来好几条广播（ACL / A2DP / HFP） */
     private const val DEDUPE_MS = 20_000L
 
@@ -72,6 +80,49 @@ object AutoPopup {
 
     @Volatile
     private var lastFire = 0L
+
+    /** 待发的弹窗（等链路稳定）；任何 profile 掉线就取消 */
+    private var pendingFire: Runnable? = null
+
+    private fun cancelPendingFire() {
+        pendingFire?.let { try { main.removeCallbacks(it) } catch (t: Throwable) { } }
+        pendingFire = null
+    }
+
+    /** A2DP + HFP 都真的连上了才算稳定 */
+    private fun profilesReady(): Boolean {
+        return try {
+            val a = BluetoothAdapter.getDefaultAdapter() ?: return true
+            val a2 = a.getProfileConnectionState(BluetoothProfile.A2DP)
+            val hs = a.getProfileConnectionState(BluetoothProfile.HEADSET)
+            a2 == BluetoothProfile.STATE_CONNECTED && hs == BluetoothProfile.STATE_CONNECTED
+        } catch (t: Throwable) {
+            true
+        }
+    }
+
+    /**
+     * ★ 延时弹 + 可取消。耳机刚连上时 profile 会抖（state 2 → 0 → 2），
+     *   这时候弹出来，宿主自己会因为掉线把页面收掉，用户就看到「闪一下没了」。
+     *   所以等 STABLE_MS 内没再抖、且两个 profile 都在，才真弹。
+     */
+    private fun fireWhenStable(mac: String, title: String, reason: String) {
+        cancelPendingFire()
+        val r = Runnable {
+            try {
+                if (!profilesReady()) {
+                    log("自动弹窗：profile 还没稳（$reason），等下一次广播")
+                    return@Runnable
+                }
+                fire(mac, title, reason, 0L)
+            } catch (t: Throwable) {
+                log("自动弹窗：延时触发失败 ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+        pendingFire = r
+        main.postDelayed(r, STABLE_MS)
+        log("自动弹窗：链路抖动观察 ${STABLE_MS}ms（$reason）")
+    }
 
     /**
      * 插在每个进程的 Application#onCreate 之后。
@@ -155,11 +206,8 @@ object AutoPopup {
                     if (le.isNullOrEmpty()) return
                     log("GMS 推送 LE 地址：$le（classic=${classic ?: "?"} 设备=${name ?: "?"}）")
                     LeCache.put(c, classic, le)
-                    // ★ 拿到地址就弹：此时经典链路已由 ACL 建立，A2DP 可能还差 1~2 秒，
-                    //   但我们已经有 LE 地址+缓存，足够把卡片叫起来（prewarm 会补齐数据）。
-                    if (!classic.isNullOrEmpty()) {
-                        fire(classic, titleOf(name), "GMS 提前发现", 150L)
-                    }
+                    // 注意：这里不弹窗。GMS 报地址时 A2DP 往往还没连稳，
+                    // 弹出来会被宿主按"设备掉线"收掉（0.6.1 实测：2.5s 闪一下、7s 才真弹）。
                     PanelInjector.prewarm(c, 0L)
                 } catch (t: Throwable) {
                     log("处理 GMS 推送失败: ${t.javaClass.simpleName}: ${t.message}")
@@ -229,10 +277,13 @@ object AutoPopup {
                     return
                 }
                 if (!act.endsWith("CONNECTION_STATE_CHANGED")) return
-                if (state != 2) return
-                // 刚刚扫到过设备（8 秒内）说明链路早就热了，不用再等 900ms
-                val delay = if (LeDiscovery.freshHit()) 0L else CONNECT_DELAY_MS
-                fire(addr, titleOf(name), "广播 $act", delay)
+                if (state != 2) {
+                    // 链路在抖（2 → 0 → 2）。这时候别弹，弹了宿主也会自己收掉
+                    cancelPendingFire()
+                    log("自动弹窗：链路抖动 state=$state，取消待弹（$act）")
+                    return
+                }
+                fireWhenStable(addr, titleOf(name), "广播 $act")
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")
             }

@@ -153,6 +153,10 @@ object PanelInjector {
     @Volatile
     private var handshakeDone = false
 
+    /** 建链防重入的时间戳：prewarm 和卡片页几乎同时调用 ensureLink，两次 GATT 会互相打断 */
+    @Volatile
+    private var linkingAt = 0L
+
     /** 正在发送中的目标模式（-1 = 空闲）。用来画 loading 态 */
     @Volatile
     private var pendingChipMode = -1
@@ -1395,6 +1399,15 @@ object PanelInjector {
      */
     private fun ensureLink(ctx: Context): Boolean {
         if (client.isConnected) return true
+        // ★ 防重入：prewarm 和卡片页会几乎同时调用这里，两次 GATT 撞在一起
+        //   会把订阅打断（日志里的「订阅 response 失败」「链路被设备关闭」就是它），
+        //   接着耳机自己掉一次 profile，宿主把刚弹出来的页面收掉——别再来一次。
+        val now = SystemClock.elapsedRealtime()
+        if (now - linkingAt < 12000L) {
+            log("建链：上一次还在进行中（${now - linkingAt}ms 前），跳过本次")
+            return false
+        }
+        linkingAt = now
         val dev = client.pickMoondrop() ?: client.candidateDevices().firstOrNull()
         if (dev == null) {
             log("找不到已配对的耳机")
@@ -1405,6 +1418,7 @@ object PanelInjector {
         log("建链：先试 GATT（目标 ${dev.address} ${dev.name ?: "?"}）")
         if (client.connectGatt(ctx, dev)) {
             log("GATT 就绪 ${client.deviceAddress}，用时 ${SystemClock.elapsedRealtime() - t0}ms")
+            linkingAt = 0L
             return true
         }
         log("GATT 没连上（用时 ${SystemClock.elapsedRealtime() - t0}ms）→ 回退 RFCOMM/SPP")

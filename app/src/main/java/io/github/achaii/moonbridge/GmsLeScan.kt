@@ -42,8 +42,13 @@ object GmsLeScan {
     const val ACT_FOUND = "io.github.achaii.moonbridge.LE_ADDR_FOUND"
 
     private const val HOST_PKG = "com.heytap.mydevices"
-    private const val WINDOW_MS = 10_000L
-    private const val THROTTLE_MS = 8_000L
+    /**
+     * 扫描窗口 / 节流。之前是 10s + 8s，窗口比节流长 → 连着来两个请求就会
+     * 「扫描跳过：上一轮还在进行」，正好错过 ACL 那一瞬间（0.6.1 日志里就发生过）。
+     * 现在窗口 6s、节流 2.5s：短窗口多点几次，代价是几乎为零的功耗。
+     */
+    private const val WINDOW_MS = 6_000L
+    private const val THROTTLE_MS = 2_500L
 
     private val main = Handler(Looper.getMainLooper())
 
