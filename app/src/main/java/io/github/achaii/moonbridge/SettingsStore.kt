@@ -26,12 +26,24 @@ object SettingsStore {
 
     private const val PREFS = "moonbridge"
     private const val K_POPUP = "autoPopup"
+    private const val K_FAST = "fastPopup"
     private const val K_ICON_KEY = "iconKey"
 
     /** 头图最长边，超过就缩 —— 广播有 1MB 上限，也免得注入端内存吃紧 */
     private const val MAX_EDGE = 1000
 
     fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /**
+     * 提速弹窗：GMS 侧常驻扫描，开盖扫到就弹（不等蓝牙连接）。
+     * 默认关 —— 能省一点电；关掉也不影响使用，只是退回「连接后弹窗」。
+     */
+    fun fastPopup(c: Context): Boolean = prefs(c).getBoolean(K_FAST, false)
+
+    fun setFastPopup(c: Context, on: Boolean) {
+        prefs(c).edit().putBoolean(K_FAST, on).apply()
+        pushSettings(c)
+    }
 
     /** 自动弹窗开关（默认开） */
     fun autoPopup(c: Context): Boolean = prefs(c).getBoolean(K_POPUP, true)

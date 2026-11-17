@@ -130,6 +130,9 @@ object PanelInjector {
         // 空间音频 / 头部追踪（官方 onSpatialResult / onHeadTrackingResult）
         client.onSpatial = { s -> main.post { applySpatial(s) } }
         client.onHeadTracking = { m -> main.post { applyHeadTracking(m) } }
+        // 扩展设备控制：增益 / 指示灯回报
+        client.onGain = { dev -> main.post { gainDev = dev; refreshGainChips() } }
+        client.onLed = { on -> main.post { ledOn = on; refreshLedSwitch() } }
     }
     internal val main = Handler(Looper.getMainLooper())
 
@@ -221,6 +224,17 @@ object PanelInjector {
     /** 空间音频三档胶囊 */
     @Volatile
     private var spatialChips: List<TextView>? = null
+
+    // ---- 扩展设备控制（上游 DcProfile）：增益 / 指示灯 ----
+    /** 增益胶囊（低/中/高）；型号没有增益能力时为 null */
+    private var gainChips: List<TextView>? = null
+    /** 设备回报的增益设备码（-1 = 还没拿到） */
+    @Volatile
+    private var gainDev = -1
+    private var ledSwitch: Switch? = null
+    @Volatile
+    private var ledOn = false
+    private var ledSyncing = false
 
     /** 空间音频总开关（官方那个） */
     @Volatile
@@ -380,7 +394,7 @@ object PanelInjector {
             log(
                 "面板设备 = ${title ?: "(无)"} mac=$mac " +
                     "档案=${profile.key} 水月雨=${MoondropProfile.isMoondrop(title)} " +
-                    "档位=${MoondropProfile.supportedUi(profile).joinToString("/")}"
+                    "档位=${MoondropProfile.supportedUi(profile, ancV2Path()).joinToString("/")}"
             )
         }
         // 切到另一台设备时，已注入的卡片要按新档案重建（区间可能变、空间音频整行可能该消失）
@@ -970,7 +984,7 @@ object PanelInjector {
         val chips = ArrayList<TextView>()
         // 胶囊按「本型号实际支持的 UI 档位」生成（档案里 setMap = -1 的槽位直接不出现）。
         // 例如知更鸟只有降噪/透传两档，就只长两颗；GA2 四档全有。
-        for (ui in MoondropProfile.supportedUi(profile)) {
+        for (ui in MoondropProfile.supportedUi(profile, ancV2Path())) {
             val chip = TextView(c).apply {
                 text = modeName(ui)
                 textSize = 13f
@@ -1054,6 +1068,75 @@ object PanelInjector {
             spatialSwitch = null
         }
 
+        // ── 扩展设备控制：增益（低/中/高）与指示灯（来自上游 DcProfile） ──
+        //    DcProfile 里没写的型号（如知更鸟）这两块整行不出现，免得出现点了没反应的按钮。
+        if (profile.hasGain) {
+            val gainHeader = TextView(c).apply {
+                text = "增益"
+                textSize = 13f
+                setTextColor(ink(c, true))
+                setPadding(0, dp(c, 12), 0, dp(c, 4))
+            }
+            root.addView(gainHeader)
+            val grow = LinearLayout(c).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val gc = ArrayList<TextView>()
+            for (i in 0..2) {
+                val chip = TextView(c).apply {
+                    text = MoondropProfile.gainName(i)
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(c, 14), dp(c, 8), dp(c, 14), dp(c, 8))
+                    isClickable = true
+                    isFocusable = true
+                    tag = i
+                    setOnClickListener { onGainClick(i, gc) }
+                }
+                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                if (gc.isNotEmpty()) lp.marginStart = dp(c, 8)
+                grow.addView(chip, lp)
+                gc.add(chip)
+            }
+            root.addView(grow)
+            gainChips = gc
+            refreshGainChips()
+        } else {
+            gainChips = null
+        }
+        if (profile.hasLed) {
+            val ledRow = LinearLayout(c).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(c, 12), 0, 0)
+            }
+            val ledTitle = TextView(c).apply {
+                text = "指示灯"
+                textSize = 13f
+                setTextColor(ink(c, true))
+            }
+            ledRow.addView(
+                ledTitle,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            val sw = Switch(c).apply {
+                isChecked = ledOn
+                setOnCheckedChangeListener { _, checked -> if (!ledSyncing) onLedToggle(checked) }
+            }
+            ledRow.addView(
+                sw,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            root.addView(ledRow)
+            ledSwitch = sw
+            refreshLedSwitch()
+        } else {
+            ledSwitch = null
+        }
         // ★ 临时诊断行：直接发裸设备码 0~4，用来实测这台耳机到底认哪个码。
         // 测出真实映射后把 PROBE 改回 false（或删掉这几行）。
         if (PROBE) {
@@ -1345,7 +1428,7 @@ object PanelInjector {
             // ★ 官方时序（之前缺的就是这一段）：连接 → 阶梯探测 → 1200ms 前置等待 → 才允许下发控制
             handshake()
 
-            val dev = MoondropProfile.devForUi(profile, ui)
+            val dev = MoondropProfile.devForUi(profile, ui, ancV2Path())
             if (dev < 0) {
                 log("${profile.key} 没有「${modeName(ui)}」这一档，不下发")
                 toast(ctx, "${profile.key} 不支持「${modeName(ui)}」")
@@ -1369,6 +1452,9 @@ object PanelInjector {
      *   - 握手时两条都探（AC 0x08 / V2 0x20），哪条真的回了 getMode 就用哪条；
      *   - 两条都没回（比如固件不回 ACK）才退到型号档案的 hint（GA2 系 = 0x08）。
      */
+    /** 当前是不是 ANC_V2（0x20）通道 —— 决定用 4 槽还是 6 槽映射表 */
+    private fun ancV2Path(): Boolean = ancFeature() == GaiaProtocol.F_ANC_V2
+
     private fun ancFeature(): Int {
         val probed = client.ancPath
         if (probed == GaiaProtocol.F_AUDIO_CURATION || probed == GaiaProtocol.F_ANC_V2) {
@@ -1530,6 +1616,23 @@ object PanelInjector {
                 log("空间音频查询重试失败: ${t.javaClass.simpleName}")
             }
         }
+        // 扩展设备控制：型号支持才问（DcProfile 的 hasGain/hasLed）
+        if (profile.hasGain) {
+            try {
+                Thread.sleep(200)
+            } catch (t: InterruptedException) {
+                return
+            }
+            log("增益查询 sent=${client.fetchGain()}")
+        }
+        if (profile.hasLed) {
+            try {
+                Thread.sleep(200)
+            } catch (t: InterruptedException) {
+                return
+            }
+            log("指示灯查询 sent=${client.fetchLed()}")
+        }
         startBattPolling()
     }
 
@@ -1540,7 +1643,7 @@ object PanelInjector {
      *   布丁（ANC_V2）：GET 0/4/2/3 = 关/降/透/抗，多一个 1 = 自适应（UI 里没有这一档）
      */
     private fun applyDeviceMode(dev: Int) {
-        val ui = MoondropProfile.uiForDev(profile, dev)
+        val ui = MoondropProfile.uiForDev(profile, dev, ancV2Path())
         if (ui < 0) {
             log("设备回报未知模式 dev=$dev（档案 ${profile.key} 里没有这个码）")
             return
@@ -1565,6 +1668,82 @@ object PanelInjector {
      * 所以这里 -1 不再当"这次没报、保留旧值"，而是明确的「这只不在线」。
      * 旧策略会让「左耳摘下来放回充电盒」之后还一直显示旧电量，用户看到的其实是假数据。
      */
+    // ------------------------------------------------------------------
+    // 扩展设备控制：增益 / 指示灯（上游 DcProfile）
+    // ------------------------------------------------------------------
+    private fun refreshGainChips() {
+        val chips = gainChips ?: return
+        val c = chips.firstOrNull()?.context ?: return
+        val ac = accent(c)
+        val normal = ink(c, false)
+        val cur = profile.gainMap.indexOf(gainDev)
+        for (chip in chips) {
+            val i = (chip.tag as? Int) ?: -1
+            val sel = i == cur
+            chip.background = GradientDrawable().apply {
+                cornerRadius = dp(c, 18).toFloat()
+                setColor(if (sel) (ac and 0x00FFFFFF) or (0x2E shl 24) else 0x14808080)
+            }
+            chip.setTextColor(if (sel) ac else normal)
+        }
+    }
+
+    private fun onGainClick(level: Int, chips: List<TextView>) {
+        val c = chips.firstOrNull()?.context ?: return
+        val dev = profile.gainMap.getOrNull(level) ?: return
+        gainChips = chips
+        gainDev = dev                       // 乐观更新，回读会再校正
+        refreshGainChips()
+        worker.execute {
+            try {
+                if (!ensureLink(c)) {
+                    toast(c, "耳机链路没连上，稍等一下再点")
+                    return@execute
+                }
+                handshake()
+                log("增益 → ${MoondropProfile.gainName(level)}（dev=$dev）")
+                client.setGain(dev)
+                Thread.sleep(250)
+                client.fetchGain()
+            } catch (t: Throwable) {
+                log("设置增益失败: ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+    }
+
+    private fun refreshLedSwitch() {
+        val sw = ledSwitch ?: return
+        if (sw.isChecked != ledOn) {
+            ledSyncing = true
+            try {
+                sw.isChecked = ledOn
+            } finally {
+                ledSyncing = false
+            }
+        }
+    }
+
+    private fun onLedToggle(on: Boolean) {
+        val c = ledSwitch?.context ?: return
+        ledOn = on
+        refreshLedSwitch()
+        worker.execute {
+            try {
+                if (!ensureLink(c)) {
+                    toast(c, "耳机链路没连上，稍等一下再点")
+                    return@execute
+                }
+                handshake()
+                log("指示灯 → ${if (on) "开" else "关"}")
+                client.setLed(on)
+                Thread.sleep(250)
+                client.fetchLed()
+            } catch (t: Throwable) {
+                log("设置指示灯失败: ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+    }
+
     private fun applyBattery(left: Int, right: Int, case: Int) {
         battReported = true
         // ★ 0 也当「不在线」：单耳/入盒时固件**不会省略那一对**，而是回 level=0

@@ -53,6 +53,10 @@ class GaiaClient {
 
     /** 头部追踪档位回报（0 关闭追踪 / 1 30° / 2 全方位） */
     var onHeadTracking: ((mode: Int) -> Unit)? = null
+    /** 增益档回报（设备码；0/1/2 的具体含义由型号档案的 gainMap 决定） */
+    var onGain: ((dev: Int) -> Unit)? = null
+    /** 指示灯开关回报 */
+    var onLed: ((on: Boolean) -> Unit)? = null
 
     val isConnected: Boolean
         get() = gatt?.isReady() == true || transport?.isReady() == true
@@ -163,9 +167,61 @@ class GaiaClient {
             parseBatteryLevels(pdu)
             parseSpatial(pdu)
             parseFeatures(pdu)
+            parseGain(pdu)
+            parseLed(pdu)
         } catch (t: Throwable) {
             log("解析回包失败: ${t.message}")
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 扩展设备控制：增益（F_DAC_GAIN 0x0F）/ 指示灯（F_LED 0x13）
+    //   照上游 GaiaCommands.dacGainGet/Set、ledGet/Set：
+    //     GET  feature=0x0F cmd=1 → 回 00 1D 1F 01 <level>
+    //     SET  feature=0x0F cmd=2 <level>
+    //     GET  feature=0x13 cmd=1 → 回 00 1D 27 01 <0/1>
+    //     SET  feature=0x13 cmd=2 <0/1>
+    // ------------------------------------------------------------------
+    fun fetchGain(): Boolean = sendCommand(GaiaProtocol.F_DAC_GAIN, GaiaProtocol.DAC_GET_GAIN)
+
+    fun setGain(devLevel: Int): Boolean = sendCommand(
+        GaiaProtocol.F_DAC_GAIN, GaiaProtocol.DAC_SET_GAIN, byteArrayOf(devLevel.toByte())
+    )
+
+    fun fetchLed(): Boolean = sendCommand(GaiaProtocol.F_LED, GaiaProtocol.LED_GET_STATE)
+
+    fun setLed(on: Boolean): Boolean = sendCommand(
+        GaiaProtocol.F_LED, GaiaProtocol.LED_SET_STATE, byteArrayOf((if (on) 1 else 0).toByte())
+    )
+
+    private fun parseGain(pdu: ByteArray) {
+        if (pdu.size < 5) return
+        val vendor = ((pdu[0].toInt() and 0xFF) shl 8) or (pdu[1].toInt() and 0xFF)
+        if (vendor != 0x001D) return
+        val cmdValue = ((pdu[2].toInt() and 0xFF) shl 8) or (pdu[3].toInt() and 0xFF)
+        val feature = cmdValue shr 9
+        val type = (cmdValue shr 7) and 0x03
+        val cmd = cmdValue and 0x7F
+        if (type != GaiaProtocol.TYPE_RESP) return
+        if (feature != GaiaProtocol.F_DAC_GAIN || cmd != GaiaProtocol.DAC_GET_GAIN) return
+        val level = pdu[4].toInt() and 0xFF
+        log("设备回报增益：dev=$level")
+        onGain?.invoke(level)
+    }
+
+    private fun parseLed(pdu: ByteArray) {
+        if (pdu.size < 5) return
+        val vendor = ((pdu[0].toInt() and 0xFF) shl 8) or (pdu[1].toInt() and 0xFF)
+        if (vendor != 0x001D) return
+        val cmdValue = ((pdu[2].toInt() and 0xFF) shl 8) or (pdu[3].toInt() and 0xFF)
+        val feature = cmdValue shr 9
+        val type = (cmdValue shr 7) and 0x03
+        val cmd = cmdValue and 0x7F
+        if (type != GaiaProtocol.TYPE_RESP) return
+        if (feature != GaiaProtocol.F_LED || cmd != GaiaProtocol.LED_GET_STATE) return
+        val on = (pdu[4].toInt() and 0xFF) != 0
+        log("设备回报指示灯：${if (on) "开" else "关"}")
+        onLed?.invoke(on)
     }
 
     /**

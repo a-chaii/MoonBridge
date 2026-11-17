@@ -28,4 +28,6 @@
 
     <string name="dialog_license">GNU General Public License v3.0</string>
     <string name="ok">好</string>
+    <string name="feature_fast_title">提速弹窗</string>
+    <string name="feature_fast_desc">开盖就被发现：借 GMS 常驻扫描，在蓝牙连上之前弹出卡片（需要 GMS 作用域；没开或 GMS 残缺时，仍会在连接后弹）</string>
 </resources>

@@ -128,6 +128,8 @@ object AutoPopup {
         registerBtReceiver(app, process)
         registerTestReceiver(app, process)
         registerFoundReceiver(app, process)
+        // 把「提速弹窗」开关同步给 GMS（它默认不扫，得我们告诉它）
+        SettingsSync.sendFastConfig(app)
     }
 
     /**
@@ -179,6 +181,12 @@ object AutoPopup {
                     val classic = classify(c, classic0, le, name)
                     log("GMS 推送 LE 地址：$le（classic=${classic ?: "?"} 设备=${name ?: "?"}）")
                     LeCache.put(c, classic, le)
+                    // 提速弹窗是可选功能：没开就只预热，弹窗交给「连接后」那条老路
+                    if (!SettingsSync.fastPopup()) {
+                        log("扫描发现：提速弹窗没开，不提前弹（等连接后）")
+                        PanelInjector.prewarm(c, 0L)
+                        return
+                    }
                     if (!classic.isNullOrEmpty()) {
                         fire(classic, titleOf(name), "扫描发现", 0L)
                     } else {

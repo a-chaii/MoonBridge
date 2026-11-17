@@ -25,6 +25,7 @@ import com.google.android.material.materialswitch.MaterialSwitch
 class MainActivity : Activity() {
 
     private lateinit var switchPopup: MaterialSwitch
+    private lateinit var switchFast: MaterialSwitch
     private lateinit var tvIconState: TextView
     private lateinit var ivIconPreview: ImageView
 
@@ -41,6 +42,7 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.tvVersionChip).text = "v$version"
 
         switchPopup = findViewById(R.id.switchPopup)
+        switchFast = findViewById(R.id.switchFast)
         tvIconState = findViewById(R.id.tvIconState)
         ivIconPreview = findViewById(R.id.ivIconPreview)
 
@@ -51,7 +53,18 @@ class MainActivity : Activity() {
             toast(if (checked) "已开启自动弹窗" else "已关闭自动弹窗")
         }
 
+        // 提速弹窗：GMS 常驻扫描，扫到就弹（默认关，开了才扫）
+        switchFast.isChecked = SettingsStore.fastPopup(this)
+        switchFast.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setFastPopup(this, checked)
+            toast(
+                if (checked) "已开启提速弹窗（需要 GMS 作用域）"
+                else "已关闭提速弹窗，仍会在连接后弹窗"
+            )
+        }
+
         findViewById<View>(R.id.rowIcon).setOnClickListener { pickIconKey() }
+        ivIconPreview.setOnClickListener { showLargePreview() }
         findViewById<View>(R.id.rowGithub).setOnClickListener {
             openUrl("https://github.com/a-chaii/MoonBridge")
         }
@@ -170,13 +183,65 @@ class MainActivity : Activity() {
             toast("没有选中型号")
             return
         }
-        val f = SettingsStore.pushHeadIcon(this, uri, key)
-        if (f == null) {
+        val bmp = runCatching {
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+        if (bmp == null) {
             toast("读图失败，换一张试试")
-        } else {
-            refreshIconRow()
-            toast("已应用 $key 的头图（重启设备空间后生效）")
+            return
         }
+        showIconPreviewDialog(key, bmp, uri)
+    }
+
+    /** 选完图先预览：「应用 / 重选 / 取消」，不满意不用先写进去再恢复 */
+    private fun showIconPreviewDialog(key: String, bmp: android.graphics.Bitmap, uri: Uri) {
+        val iv = ImageView(this).apply {
+            setImageBitmap(bmp)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(24, 24, 24, 24)
+        }
+        val w = (resources.displayMetrics.widthPixels * 0.8f).toInt()
+        val h = (bmp.height.toFloat() / bmp.width * w).toInt().coerceAtLeast(120)
+        iv.layoutParams = android.view.ViewGroup.LayoutParams(w, h)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("预览：$key 的头图")
+            .setView(iv)
+            .setPositiveButton("应用") { _, _ ->
+                val f = SettingsStore.pushHeadIcon(this, uri, key)
+                if (f == null) {
+                    toast("保存失败，换一张试试")
+                } else {
+                    refreshIconRow()
+                    toast("已应用 $key 的头图（重启设备空间后生效）")
+                }
+            }
+            .setNeutralButton("重选") { _, _ ->
+                pendingKey = key
+                openImagePicker()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 点缩略图看大图 */
+    private fun showLargePreview() {
+        val key = SettingsStore.iconKey(this)
+        if (key.isEmpty()) return
+        val f = SettingsStore.localIconFile(this, key)
+        val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() ?: return
+        val iv = ImageView(this).apply {
+            setImageBitmap(bmp)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(16, 16, 16, 16)
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("当前头图：$key")
+            .setView(iv)
+            .setPositiveButton("换一张") { _, _ -> pickIconKey() }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     // ---------------- 小工具 ----------------

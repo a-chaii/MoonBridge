@@ -34,6 +34,17 @@ object GaiaProtocol {
     const val F_ONEBRINGTWO = 20
     const val F_ANC_V1 = 2
     const val F_ANC_V2 = 32
+    /**
+     * 扩展设备控制（上游 DcProfile 用的那条通道）：
+     *   F_DAC_GAIN = 0x0F，CMD 1=GET 2=SET payload[0]=档位
+     *   F_LED      = 0x13，CMD 1=GET 2=SET payload[0]=0/1
+     */
+    const val F_DAC_GAIN = 15
+    const val F_LED = 19
+    const val DAC_GET_GAIN = 1
+    const val DAC_SET_GAIN = 2
+    const val LED_GET_STATE = 1
+    const val LED_SET_STATE = 2
 
     // ANC 命令
     const val ANC_GET_MODE = 3

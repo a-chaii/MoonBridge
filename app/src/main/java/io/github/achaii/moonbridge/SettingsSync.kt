@@ -37,6 +37,10 @@ object SettingsSync {
     @Volatile
     private var cachedPopup = true
 
+    /** 提速弹窗（GMS 常驻扫描）：默认关 */
+    @Volatile
+    private var cachedFast = false
+
     @Volatile
     private var cachedMtime = -1L
 
@@ -48,12 +52,14 @@ object SettingsSync {
         register(app, SettingsStore.ACT_SETTINGS) { i ->
             val json = i.getStringExtra("json") ?: return@register
             try {
-                JSONObject(json).optBoolean("autoPopup", true).let {
-                    writeFile(app, json)
-                    cachedPopup = it
-                    cachedMtime = settingsFile(app).lastModified()
-                    log("设置已更新：自动弹窗=$it")
-                }
+                val o = JSONObject(json)
+                writeFile(app, json)
+                cachedPopup = o.optBoolean("autoPopup", true)
+                cachedFast = o.optBoolean("fastPopup", false)
+                cachedMtime = settingsFile(app).lastModified()
+                log("设置已更新：自动弹窗=$cachedPopup 提速弹窗=$cachedFast")
+                // 顺手把「要不要常驻扫描」告诉 GMS 那边（它在另一个进程，读不到这份文件）
+                sendFastConfig(app)
             } catch (t: Throwable) {
                 log("设置解析失败: ${t.javaClass.simpleName}: ${t.message}")
             }
@@ -89,6 +95,38 @@ object SettingsSync {
             }.getOrDefault(true)
         }
         return cachedPopup
+    }
+
+    /** 提速弹窗是否启用（默认 false） */
+    fun fastPopup(): Boolean {
+        val c = ctx ?: return false
+        val f = settingsFile(c)
+        val mt = runCatching { f.lastModified() }.getOrDefault(0L)
+        if (f.exists() && mt != cachedMtime) {
+            cachedMtime = mt
+            val o = runCatching { JSONObject(f.readText()) }.getOrNull()
+            cachedPopup = o?.optBoolean("autoPopup", true) ?: true
+            cachedFast = o?.optBoolean("fastPopup", false) ?: false
+        }
+        return cachedFast
+    }
+
+    /**
+     * 把「提速弹窗 / 常驻扫描」开关同步给 GMS 进程。
+     * GMS 侧默认不扫，只有收到 true 才挂常驻扫描 —— 这样不开这个功能的用户不会多耗电。
+     */
+    fun sendFastConfig(c: Context) {
+        try {
+            val i = Intent(GmsLeScan.ACT_CFG).apply {
+                setPackage("com.google.android.gms")
+                putExtra("fast", fastPopup())
+                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            }
+            c.sendBroadcast(i)
+            log("已同步提速弹窗开关到 GMS：${fastPopup()}")
+        } catch (t: Throwable) {
+            log("同步提速开关失败: ${t.javaClass.simpleName}")
+        }
     }
 
     /** 用户给这个型号设的头图；没有就返回 null（调用方回退到内置图） */

@@ -156,4 +156,32 @@ class ProfileMappingTest {
         assertEquals("透传", MoondropProfile.uiName(2))
         assertEquals("抗风噪", MoondropProfile.uiName(3))
     }
+
+    // ---- 上游 DcProfile 同步：增益 / LED / ANC_V2 六档 ----
+
+    @Test
+    fun dcCapabilities_matchUpstream() {
+        assertTrue(MoondropProfile.of("GOLDEN AGES 2")!!.hasGain)
+        assertFalse(MoondropProfile.of("GOLDEN AGES 2")!!.hasLed)
+        assertTrue(MoondropProfile.of("PUDDING")!!.hasLed)
+        assertFalse(MoondropProfile.of("ROBIN")!!.hasGain)
+    }
+
+    @Test
+    fun gainMaps_arePerModel() {
+        // GA2 / 太空漫游 2：0=高 1=中 2=低（反向）
+        assertArrayEquals(intArrayOf(2, 1, 0), MoondropProfile.of("GOLDEN AGES 2")!!.gainMap)
+        assertArrayEquals(intArrayOf(2, 1, 0), MoondropProfile.of("SPACE TRAVEL 2")!!.gainMap)
+        // 布丁等：恒等
+        assertArrayEquals(intArrayOf(0, 1, 2), MoondropProfile.of("PUDDING")!!.gainMap)
+    }
+
+    @Test
+    fun ancV2_supportedUi_hasAdaptiveButNoLive() {
+        val p = MoondropProfile.of("PUDDING")!!
+        assertArrayEquals(intArrayOf(0, 1, 2, 3, 4), MoondropProfile.supportedUi(p, ancV2 = true))
+        assertEquals(1, MoondropProfile.devForUi(p, 4, ancV2 = true))
+        assertEquals(4, MoondropProfile.uiForDev(p, 1, ancV2 = true))
+        assertEquals(-1, MoondropProfile.devForUi(p, 5, ancV2 = true))
+    }
 }

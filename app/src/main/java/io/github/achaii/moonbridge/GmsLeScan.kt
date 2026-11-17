@@ -47,6 +47,9 @@ object GmsLeScan {
     const val ACT_REQ = "io.github.achaii.moonbridge.REQ_LE_SCAN"
     const val ACT_FOUND = "io.github.achaii.moonbridge.LE_ADDR_FOUND"
 
+    /** 宿主 → GMS：要不要开常驻扫描（对应模块里的「提速弹窗」开关） */
+    const val ACT_CFG = "io.github.achaii.moonbridge.CFG_FAST"
+
     private const val HOST_PKG = "com.heytap.mydevices"
 
     /** 急扫：窗口 6s、节流 2.5s（窗口比节流长会「上一轮还在进行」，0.6.1 踩过） */
@@ -71,6 +74,10 @@ object GmsLeScan {
     private var app: Context? = null
 
     // ---- 常驻发现扫描 ----
+    /** 只有模块里打开「提速弹窗」才常驻扫描，默认不扫（省电） */
+    @Volatile
+    private var fastEnabled = false
+
     @Volatile
     private var guardScanning = false
     private var guardCb: ScanCallback? = null
@@ -122,8 +129,32 @@ object GmsLeScan {
         } catch (t: Throwable) {
             log("GMS 侧注册接收器失败: ${t.javaClass.simpleName}: ${t.message}")
         }
-        // ★ 常驻发现扫描：开盖那一刻耳机就开始广播，一直挂着才能立刻发现
-        main.post { startGuardScan(process) }
+        // 配置接收器：开/关常驻扫描
+        val cfg = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val on = i.getBooleanExtra("fast", false)
+                fastEnabled = on
+                log("收到提速弹窗配置：常驻扫描=$on（process=$process）")
+                if (on) main.post { startGuardScan(process) } else stopGuardScan("配置关闭")
+            }
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                Context::class.java.getMethod(
+                    "registerReceiver",
+                    BroadcastReceiver::class.java,
+                    IntentFilter::class.java,
+                    Int::class.javaPrimitiveType
+                ).invoke(a, cfg, IntentFilter(ACT_CFG), 0x2)
+            } else {
+                a.registerReceiver(cfg, IntentFilter(ACT_CFG))
+            }
+            log("GMS 侧已注册提速配置接收器（process=$process）")
+        } catch (t: Throwable) {
+            log("GMS 侧注册配置接收器失败: ${t.javaClass.simpleName}")
+        }
+        // 常驻扫描要等配置来才启动；默认不挂，免得占电
+        main.post { if (fastEnabled) startGuardScan(process) }
     }
 
     // ------------------------------------------------------------------
@@ -131,6 +162,10 @@ object GmsLeScan {
     // ------------------------------------------------------------------
 
     private fun startGuardScan(process: String) {
+        if (!fastEnabled) {
+            log("常驻扫描跳过：模块里没开提速弹窗")
+            return
+        }
         if (guardScanning) return
         val adapter = adapterOrNull() ?: return
         if (!adapter.isEnabled) return
