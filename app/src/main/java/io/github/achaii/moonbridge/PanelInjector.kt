@@ -1567,11 +1567,14 @@ object PanelInjector {
      */
     private fun applyBattery(left: Int, right: Int, case: Int) {
         battReported = true
-        leftOnline = left >= 0
-        rightOnline = right >= 0
-        if (left >= 0) battLeft = left
-        if (right >= 0) battRight = right
-        if (case >= 0) battCase = case
+        // ★ 0 也当「不在线」：单耳/入盒时固件**不会省略那一对**，而是回 level=0
+        //   （日志实测：`id=1 level=0 id=2 level=100`，左耳在盒里）。真 0% 早就关机了，
+        //   所以判 >0 比判 >=0 更贴近事实，不会再把离线的那只写成「0%」。
+        leftOnline = left > 0
+        rightOnline = right > 0
+        if (left > 0) battLeft = left
+        if (right > 0) battRight = right
+        if (case > 0) battCase = case
         refreshBatteryText()
         refreshSingleEarGate()
     }
@@ -1588,7 +1591,9 @@ object PanelInjector {
             try {
                 val l = if (leftOnline) "$battLeft%" else "离线"
                 val r = if (rightOnline) "$battRight%" else "离线"
-                v.text = if (!battReported) "电量 --" else "左耳 $l · 右耳 $r"
+                // 还没拿到任何电量时显示「获取中」——卡片可能比蓝牙连接先弹出来
+                //（扫描发现即弹），这段时间总得让人知道我们在干活，而不是显示假的 0%。
+                v.text = if (!battReported) "电量获取中…" else "左耳 $l · 右耳 $r"
             } catch (t: Throwable) {
             }
         }

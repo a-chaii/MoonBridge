@@ -1,5 +1,6 @@
 package io.github.achaii.moonbridge
 
+import android.bluetooth.BluetoothAdapter
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -74,6 +75,13 @@ object AutoPopup {
 
     @Volatile
     private var lastFire = 0L
+
+    /** 上一次弹窗是因为哪副耳机（GMS 常驻扫描会反复上报，得挡一下，不然卡片自己循环弹） */
+    @Volatile
+    private var lastFireMac: String? = null
+
+    @Volatile
+    private var lastFireMacAt = 0L
 
     /**
      * 速度优先：不做抖动观察、不查 profile 状态，直接弹。
@@ -161,16 +169,20 @@ object AutoPopup {
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 try {
-                    val classic = i.getStringExtra("classic")
+                    val classic0 = i.getStringExtra("classic")
                     val le = i.getStringExtra("le")
                     val name = i.getStringExtra("name")
                     if (le.isNullOrEmpty()) return
+                    // ★ 发现即弹窗：GMS 常驻扫描在**开盖那一刻**就能扫到广播，
+                    //   此时耳机还没连上（A2DP/HFP 都没起）。上游也是这么干的：
+                    //   扫到就先弹，卡片里先显示「获取中」，数据等 GAIA 连上再补。
+                    val classic = classify(c, classic0, le, name)
                     log("GMS 推送 LE 地址：$le（classic=${classic ?: "?"} 设备=${name ?: "?"}）")
                     LeCache.put(c, classic, le)
-                    // 第二重机会：ACL 广播里有时候 name 为空（我们没法判定是不是水月雨），
-                    // GMS 扫到的是带名字的广播，这时补一次弹窗。
                     if (!classic.isNullOrEmpty()) {
-                        fire(classic, titleOf(name), "GMS 发现", 0L)
+                        fire(classic, titleOf(name), "扫描发现", 0L)
+                    } else {
+                        log("扫描发现：找不到对应的经典地址（设备可能还没配对过），只预热不弹窗")
                     }
                     PanelInjector.prewarm(c, 0L)
                 } catch (t: Throwable) {
@@ -242,7 +254,14 @@ object AutoPopup {
                     return
                 }
                 if (!act.endsWith("CONNECTION_STATE_CHANGED")) return
-                if (state != 2) return
+                if (state != 2) {
+                    // 断开 / 重连过程中：清掉「已弹过」记号，下次连上还能正常弹
+                    if (state == 0 && addr.equals(lastFireMac, true)) {
+                        lastFireMac = null
+                        lastFireMacAt = 0L
+                    }
+                    return
+                }
                 fire(addr, titleOf(name), "广播 $act", 0L)
             } catch (t: Throwable) {
                 log("自动弹窗：广播处理异常 ${t.javaClass.simpleName}: ${t.message}")
@@ -292,6 +311,13 @@ object AutoPopup {
             log("自动弹窗：去重窗口内，跳过（$reason）")
             return
         }
+        // 同一副耳机 5 分钟内只弹一次：GMS 常驻扫描每 15 秒就会再报一次，
+        // 不挡的话用户手动关掉卡片后它又会自己弹出来
+        val nowMs = System.currentTimeMillis()
+        if (mac.equals(lastFireMac, true) && nowMs - lastFireMacAt < 300_000L) {
+            log("自动弹窗：同一副耳机 5 分钟内已弹过，跳过（$reason）")
+            return
+        }
         main.postDelayed({
             try {
                 startPanel(mac, title, reason)
@@ -299,6 +325,27 @@ object AutoPopup {
                 log("自动弹窗：启动失败 ${t.javaClass.simpleName}: ${t.message}")
             }
         }, delayMs)
+    }
+
+    /**
+     * 找出这个 LE 地址对应的**经典地址**（宿主弹卡片要的是经典 MAC）。
+     * 顺序：GMS 已经帮我们找到了 → 缓存反查 → 已配对设备里按名字/地址前缀找。
+     */
+    private fun classify(c: Context, classicFromGms: String?, le: String, name: String?): String? {
+        if (!classicFromGms.isNullOrEmpty() && !LeCache.isKnownLe(classicFromGms)) return classicFromGms
+        LeCache.reverse(le)?.let { return it }
+        return try {
+            val a = BluetoothAdapter.getDefaultAdapter() ?: return null
+            val prefix = if (le.length >= 12) le.substring(0, 12).uppercase() else ""
+            a.bondedDevices?.firstOrNull { d ->
+                val dn = d.name ?: return@firstOrNull false
+                val da = d.address ?: return@firstOrNull false
+                if (!MoondropProfile.isMoondrop(dn)) return@firstOrNull false
+                (dn == name) || (prefix.isNotEmpty() && da.length >= 12 && da.substring(0, 12).uppercase() == prefix)
+            }?.address
+        } catch (t: Throwable) {
+            null
+        }
     }
 
     /**
@@ -371,6 +418,8 @@ object AutoPopup {
         }
         try {
             c.startActivity(i)
+            lastFireMac = mac
+            lastFireMacAt = System.currentTimeMillis()
             log(
                 "自动弹窗：已启动 $CLS_DETAIL（$reason）" +
                     " 标题=$title 档案=$profileKey model_id=${modelId ?: "(省略)"} mac=$mac"

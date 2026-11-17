@@ -40,7 +40,7 @@ object LeCache {
         }
     }
 
-    /** 这个地址本身是不是某个已缓存的 LE 地址（用来忽略重复的 LE 广播，别再扫一次） */
+/** 这个地址本身是不是某个已缓存的 LE 地址（用来忽略重复的 LE 广播，别再扫一次） */
     fun isKnownLe(addr: String?): Boolean {
         val c = app ?: return false
         if (addr.isNullOrEmpty()) return false
@@ -48,6 +48,17 @@ object LeCache {
             readAll(c).values.any { it.equals(addr, true) }
         } catch (t: Throwable) {
             false
+        }
+    }
+
+    /** LE 地址反查经典地址（GMS 只报 LE 时用得上） */
+    fun reverse(leAddr: String?): String? {
+        val c = app ?: return null
+        if (leAddr.isNullOrEmpty()) return null
+        return try {
+            readAll(c).entries.firstOrNull { it.value.equals(leAddr, true) }?.key
+        } catch (t: Throwable) {
+            null
         }
     }
 
