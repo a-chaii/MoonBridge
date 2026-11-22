@@ -125,20 +125,141 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * 头图图库：一眼看到**所有型号当前用的头图**（自定义 / 内置 / 默认原图），
+     * 而不是"选了照片才看得到预览"。
+     */
     private fun pickIconKey() {
         val keys = MoondropProfile.keys()
-        val current = SettingsStore.iconKey(this)
-        val items = keys.map { if (it == current) "$it（当前）" else it } + listOf("恢复内置图")
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(0, 8, 0, 8)
+        }
+        for (key in keys) {
+            box.addView(buildGalleryRow(key))
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(box) }
         MaterialAlertDialogBuilder(this)
-            .setTitle("给哪个型号换头图")
-            .setItems(items.toTypedArray()) { _, which ->
-                if (which == keys.size) clearIcon() else {
-                    pendingKey = keys[which]
-                    openImagePicker()
+            .setTitle("型号头图")
+            .setMessage("点一行就能预览、换图或恢复内置图")
+            .setView(scroll)
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    /** 一行：缩略图 + 型号名 + 当前状态 */
+    private fun buildGalleryRow(key: String): View {
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(24, 18, 24, 18)
+            isClickable = true
+            setOnClickListener { showIconActions(key) }
+        }
+        val thumb = ImageView(this).apply {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        val lp = android.widget.LinearLayout.LayoutParams(dp(64), dp(64))
+        val bmp = currentIconBitmap(key)
+        if (bmp != null) {
+            thumb.setImageBitmap(bmp)
+        } else {
+            thumb.setBackgroundColor(0x22808080)
+        }
+        row.addView(thumb, lp)
+
+        val col = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(16), 0, 0, 0)
+        }
+        val name = TextView(this).apply {
+            text = key
+            textSize = 15f
+            setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface))
+        }
+        val state = TextView(this).apply {
+            textSize = 12f
+            setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant))
+        }
+        val custom = SettingsStore.localIconFile(this, key)
+        state.text = when {
+            custom.exists() && custom.length() > 0 -> "自定义头图 · 点击更换"
+            key == "GOLDEN AGES 2" -> "内置头图 · 点击更换"
+            else -> "默认原图 · 点击设置"
+        }
+        col.addView(name)
+        col.addView(state)
+        row.addView(col)
+        return row
+    }
+
+    /** 某型号当前实际会显示的头图：自定义 > 内置（只有 GA2 有） > null（宿主原图） */
+    private fun currentIconBitmap(key: String): android.graphics.Bitmap? {
+        val f = SettingsStore.localIconFile(this, key)
+        if (f.exists() && f.length() > 0) {
+            runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()?.let { return it }
+        }
+        return if (key == "GOLDEN AGES 2") runCatching { IconAsset.bitmap() }.getOrNull() else null
+    }
+
+    /** 点某一行后的操作 */
+    private fun showIconActions(key: String) {
+        val items = arrayOf("预览当前头图", "换一张图", "恢复内置图")
+        MaterialAlertDialogBuilder(this)
+            .setTitle(key)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> previewIcon(key)
+                    1 -> {
+                        pendingKey = key
+                        openImagePicker()
+                    }
+                    else -> {
+                        if (SettingsStore.iconKey(this) == key) {
+                            clearIcon()
+                        } else {
+                            toast("$key 当前没有自定义头图")
+                        }
+                    }
                 }
             }
-            .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 预览某个型号当前会用的头图（含内置） */
+    private fun previewIcon(key: String) {
+        val bmp = currentIconBitmap(key)
+        if (bmp == null) {
+            toast("$key 用的是宿主原图，没有内置头图")
+            return
+        }
+        val iv = ImageView(this).apply {
+            setImageBitmap(bmp)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(16, 16, 16, 16)
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("当前头图：$key")
+            .setView(iv)
+            .setPositiveButton("换一张") { _, _ ->
+                pendingKey = key
+                openImagePicker()
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** 取主题色（深浅色都跟着系统走，不写死） */
+    private fun themeColor(attr: Int): Int {
+        val tv = android.util.TypedValue()
+        return if (theme.resolveAttribute(attr, tv, true)) {
+            if (tv.resourceId != 0) androidx.core.content.ContextCompat.getColor(this, tv.resourceId)
+            else tv.data
+        } else 0xFF888888.toInt()
     }
 
     private fun openImagePicker() {
