@@ -60,6 +60,12 @@ object Capabilities {
     /** 有空间音频能力 */
     fun hasSpatial(features: Set<Int>): Boolean = F_SPATIAL in features
 
+    /** 有增益（F_DAC_GAIN = 0x0F）—— 设备自报优先，档案只做兜底 */
+    fun hasGain(features: Set<Int>): Boolean = GaiaProtocol.F_DAC_GAIN in features
+
+    /** 有指示灯（F_LED = 0x13） */
+    fun hasLed(features: Set<Int>): Boolean = GaiaProtocol.F_LED in features
+
     /**
      * ANC 走哪条路径 —— 与上游一致：AudioCuration 优先，其次 ANC_V2，再次 ANC_V1。
      * 返回 0 表示位图里没有 ANC 相关位（可能是截断，也可能真没有）。

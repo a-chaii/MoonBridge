@@ -1089,7 +1089,7 @@ object PanelInjector {
 
         // ── 扩展设备控制：增益（低/中/高）与指示灯（来自上游 DcProfile） ──
         //    DcProfile 里没写的型号（如知更鸟）这两块整行不出现，免得出现点了没反应的按钮。
-        if (profile.hasGain && SettingsSync.showGain()) {
+        if (supportsGain() && SettingsSync.showGain()) {
             val gainHeader = TextView(c).apply {
                 text = "增益"
                 textSize = 13f
@@ -1124,7 +1124,7 @@ object PanelInjector {
         } else {
             gainChips = null
         }
-        if (profile.hasLed) {
+        if (supportsLed()) {
             val ledRow = LinearLayout(c).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -1635,8 +1635,8 @@ object PanelInjector {
                 log("空间音频查询重试失败: ${t.javaClass.simpleName}")
             }
         }
-        // 扩展设备控制：型号支持才问（DcProfile 的 hasGain/hasLed）
-        if (profile.hasGain) {
+        // 扩展设备控制：设备自报（或档案兜底）支持才问
+        if (supportsGain()) {
             try {
                 Thread.sleep(200)
             } catch (t: InterruptedException) {
@@ -1644,7 +1644,7 @@ object PanelInjector {
             }
             log("增益查询 sent=${client.fetchGain()}")
         }
-        if (profile.hasLed) {
+        if (supportsLed()) {
             try {
                 Thread.sleep(200)
             } catch (t: InterruptedException) {
@@ -1805,6 +1805,18 @@ object PanelInjector {
     private fun singleEar(): Boolean {
         if (!battReported) return false
         return leftOnline != rightOnline
+    }
+
+    /** 增益：设备自报能力优先，位图还没回来时退回型号档案（DcProfile.hasGain） */
+    private fun supportsGain(): Boolean {
+        val f = client.features
+        return if (f.isEmpty()) profile.hasGain else Capabilities.hasGain(f)
+    }
+
+    /** 指示灯：同上 */
+    private fun supportsLed(): Boolean {
+        val f = client.features
+        return if (f.isEmpty()) profile.hasLed else Capabilities.hasLed(f)
     }
 
     /**
