@@ -35,6 +35,14 @@ object GaiaProtocol {
     const val F_ANC_V1 = 2
     const val F_ANC_V2 = 32
     /**
+     * ANC_V1（feature 0x02）自己的命令编号 —— 与 AudioCuration / V2 的 3/4 不同：
+     *   cmd 1 = GET_ANC_STATE   → 回 payload[0] = dev（0 表示关，非 0 表示开）
+     *   cmd 2 = SET_ANC_STATE   ← payload[0] = dev（0 关 / 1 降噪）
+     * 只有「关 / 降噪」两态（上游 GaiaCommands.ancDevFromUi：ui0→0，其余→1）。
+     */
+    const val ANC1_GET_STATE = 1
+    const val ANC1_SET_STATE = 2
+    /**
      * 扩展设备控制（上游 DcProfile 用的那条通道）：
      *   F_DAC_GAIN = 0x0F，CMD 1=GET 2=SET payload[0]=档位
      *   F_LED      = 0x13，CMD 1=GET 2=SET payload[0]=0/1

@@ -1001,7 +1001,7 @@ object PanelInjector {
         val chips = ArrayList<TextView>()
         // 胶囊按「本型号实际支持的 UI 档位」生成（档案里 setMap = -1 的槽位直接不出现）。
         // 例如知更鸟只有降噪/透传两档，就只长两颗；GA2 四档全有。
-        for (ui in MoondropProfile.supportedUi(profile, ancV2Path())) {
+        for (ui in supportedModes()) {
             // 用户可以在模块设置里隐藏「抗风噪」这一档（部分固件抗风噪体验一般）
             if (ui == 3 && !SettingsSync.showWind()) continue
             val chip = TextView(c).apply {
@@ -1447,7 +1447,7 @@ object PanelInjector {
             // ★ 官方时序（之前缺的就是这一段）：连接 → 阶梯探测 → 1200ms 前置等待 → 才允许下发控制
             handshake()
 
-            val dev = MoondropProfile.devForUi(profile, ui, ancV2Path())
+            val dev = devForMode(ui)
             if (dev < 0) {
                 log("${profile.key} 没有「${modeName(ui)}」这一档，不下发")
                 toast(ctx, "${profile.key} 不支持「${modeName(ui)}」")
@@ -1455,7 +1455,7 @@ object PanelInjector {
             }
             val feature = ancFeature()
             log("ANC 下发 ui=$ui（${modeName(ui)}）→ dev=$dev path=0x${"%02X".format(feature)}")
-            client.sendCommand(feature, GaiaProtocol.ANC_SET_MODE, byteArrayOf(dev.toByte()))
+            sendModeCommand(dev)
         } catch (t: Throwable) {
             log("发送失败: ${t.javaClass.simpleName}: ${t.message}")
             toast(ctx, "发送失败：${t.javaClass.simpleName}")
@@ -1474,9 +1474,44 @@ object PanelInjector {
     /** 当前是不是 ANC_V2（0x20）通道 —— 决定用 4 槽还是 6 槽映射表 */
     private fun ancV2Path(): Boolean = ancFeature() == GaiaProtocol.F_ANC_V2
 
+    /** 当前是不是 ANC_V1（0x02）通道 —— 只有「关 / 降噪」两态 */
+    private fun ancV1Path(): Boolean = ancFeature() == GaiaProtocol.F_ANC_V1
+
+    /** 这台设备此刻实际能用的 UI 档位（V1 只有 0/1；其余按档案与能力） */
+    private fun supportedModes(): IntArray =
+        if (ancV1Path()) intArrayOf(0, 1)
+        else MoondropProfile.supportedUi(profile, ancV2Path())
+
+    /** UI 档位 → 设备码（V1：ui0→0，其余→1，照上游 ancDevFromUi） */
+    private fun devForMode(ui: Int): Int = when {
+        ancV1Path() -> MoondropProfile.v1DevForUi(ui)
+        else -> MoondropProfile.devForUi(profile, ui, ancV2Path())
+    }
+
+    /** 设备码 → UI 档位（V1：dev0→0，其余→1） */
+    private fun uiForDevice(dev: Int): Int = when {
+        ancV1Path() -> MoondropProfile.v1UiForDev(dev)
+        else -> MoondropProfile.uiForDev(profile, dev, ancV2Path())
+    }
+
+    /** 下发 ANC：V1 用 0x02/2，其他用 getMode 对应 feature 的 SET(4) */
+    private fun sendModeCommand(dev: Int) {
+        val feature = ancFeature()
+        val cmd = if (feature == GaiaProtocol.F_ANC_V1) GaiaProtocol.ANC1_SET_STATE else GaiaProtocol.ANC_SET_MODE
+        client.sendCommand(feature, cmd, byteArrayOf(dev.toByte()))
+    }
+
     private fun ancFeature(): Int {
+        // 上游口径：能力位图（设备自报）> 探测时谁真的回包 > 型号档案
+        val f = client.features
+        if (f.isNotEmpty()) {
+            val p = Capabilities.ancPathOf(f)
+            if (p != 0) return p
+        }
         val probed = client.ancPath
-        if (probed == GaiaProtocol.F_AUDIO_CURATION || probed == GaiaProtocol.F_ANC_V2) {
+        if (probed == GaiaProtocol.F_AUDIO_CURATION || probed == GaiaProtocol.F_ANC_V2 ||
+            probed == GaiaProtocol.F_ANC_V1
+        ) {
             if (probed != profile.ancHint) {
                 log("ANC 路径以探测为准：探测=0x${"%02X".format(probed)} 档案=${profile.key} hint=0x${"%02X".format(profile.ancHint)}")
             }
@@ -1561,7 +1596,8 @@ object PanelInjector {
             Triple(F_AC, GaiaProtocol.ANC_GET_MODE, "AC/getMode"),
             Triple(F_AC, 0x29, "AC/switchConf"),
             Triple(F_V2, GaiaProtocol.ANC_GET_MODE, "V2/getMode"),
-            Triple(F_V2, 0x29, "V2/switchConf")
+            Triple(F_V2, 0x29, "V2/switchConf"),
+            Triple(GaiaProtocol.F_ANC_V1, GaiaProtocol.ANC1_GET_STATE, "V1/getState")
         )
         for ((i, step) in steps.withIndex()) {
             val due = t0 + PROBE_DELAY_BASE + i * PROBE_DELAY_STEP
@@ -1662,7 +1698,7 @@ object PanelInjector {
      *   布丁（ANC_V2）：GET 0/4/2/3 = 关/降/透/抗，多一个 1 = 自适应（UI 里没有这一档）
      */
     private fun applyDeviceMode(dev: Int) {
-        val ui = MoondropProfile.uiForDev(profile, dev, ancV2Path())
+        val ui = uiForDevice(dev)
         if (ui < 0) {
             log("设备回报未知模式 dev=$dev（档案 ${profile.key} 里没有这个码）")
             return

@@ -177,6 +177,18 @@ class ProfileMappingTest {
     }
 
     @Test
+    fun ancV1_mapsAsUpstream() {
+        // 上游 GaiaCommands.ancDevFromUi：ANC_V1 只有「关 / 降噪」，ui0→0、其余→1
+        assertEquals(0, MoondropProfile.v1DevForUi(0))
+        assertEquals(1, MoondropProfile.v1DevForUi(1))
+        assertEquals(1, MoondropProfile.v1DevForUi(2))
+        assertEquals(1, MoondropProfile.v1DevForUi(3))
+        assertEquals(0, MoondropProfile.v1UiForDev(0))
+        assertEquals(1, MoondropProfile.v1UiForDev(1))
+        assertEquals(1, MoondropProfile.v1UiForDev(9))
+    }
+
+    @Test
     fun ancV2_supportedUi_hasAdaptiveButNoLive() {
         val p = MoondropProfile.of("PUDDING")!!
         assertArrayEquals(intArrayOf(0, 1, 2, 3, 4), MoondropProfile.supportedUi(p, ancV2 = true))

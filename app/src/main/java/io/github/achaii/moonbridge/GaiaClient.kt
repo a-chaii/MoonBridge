@@ -387,6 +387,14 @@ class GaiaClient {
             val dev = pdu[4].toInt() and 0xFF
             log("设备回报 ANC 模式 dev=$dev（path=V2/0x20）")
             onAncMode?.invoke(dev)
+        } else if (feature == GaiaProtocol.F_ANC_V1 &&
+            (cmd == GaiaProtocol.ANC1_GET_STATE || cmd == GaiaProtocol.ANC1_SET_STATE)
+        ) {
+            // ANC_V1 只有「关 / 降噪」两态
+            if (ancPath == 0) ancPath = GaiaProtocol.F_ANC_V1
+            val dev = pdu[4].toInt() and 0xFF
+            log("设备回报 ANC 状态 dev=$dev（path=V1/0x02）")
+            onAncMode?.invoke(dev)
         }
     }
 

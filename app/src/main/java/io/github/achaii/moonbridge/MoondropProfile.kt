@@ -154,6 +154,12 @@ object MoondropProfile {
         else -> "档$ui"
     }
 
+    /** ANC_V1（feature 0x02）只有「关 / 降噪」两态：UI0 → dev0，其余 UI → dev1（上游 ancDevFromUi 原文） */
+    fun v1DevForUi(ui: Int): Int = if (ui == 0) 0 else 1
+
+    /** ANC_V1 回读：dev0 → UI 关，其余 → UI 降噪 */
+    fun v1UiForDev(dev: Int): Int = if (dev == 0) 0 else 1
+
     /** 增益档名（0 低 / 1 中 / 2 高） */
     fun gainName(index: Int): String = when (index) {
         0 -> "低"
