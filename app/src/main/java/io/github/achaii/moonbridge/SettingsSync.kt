@@ -79,11 +79,18 @@ object SettingsSync {
             try {
                 val o = JSONObject(json)
                 val key = o.optString("key", "").trim()
-                val b64 = o.optString("img", "")
-                if (key.isEmpty() || b64.isEmpty()) return@register
-                val bytes = Base64.decode(b64, Base64.NO_WRAP)
+                if (key.isEmpty()) return@register
                 val dir = File(app.filesDir, DIR_ICONS).apply { mkdirs() }
                 val f = File(dir, "$key.jpg")
+                // 「恢复内置图」：把宿主这边那张 jpg 删掉，applyIcon() 才会回退到内置图
+                if (o.optBoolean("delete", false)) {
+                    val gone = f.delete()
+                    log("头图已恢复内置：$key（删除 ${if (gone) "成功" else "失败(可能原本就没有)"}）")
+                    return@register
+                }
+                val b64 = o.optString("img", "")
+                if (b64.isEmpty()) return@register
+                val bytes = Base64.decode(b64, Base64.NO_WRAP)
                 f.writeBytes(bytes)
                 log("头图已更新：$key（${bytes.size / 1024} KB）→ ${f.absolutePath}")
             } catch (t: Throwable) {

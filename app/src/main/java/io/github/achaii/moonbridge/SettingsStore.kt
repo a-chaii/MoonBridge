@@ -80,6 +80,17 @@ object SettingsStore {
         send(c, ACT_HEAD_ICON, "{\"key\":\"\",\"img\":\"\"}")
     }
 
+    /**
+     * 恢复内置图：**必须通知宿主删掉那个 jpg**。
+     * 以前只删本地预览 + 清记录，宿主的 moonbridge_icons/<KEY>.jpg 还在，
+     * applyIcon() 自然继续读它 —— 这就是「点了没反应」的原因。
+     */
+    fun clearIcon(c: Context, key: String) {
+        localIconFile(c, key).delete()
+        if (iconKey(c) == key) prefs(c).edit().remove(K_ICON_KEY).apply()
+        send(c, ACT_HEAD_ICON, "{\"key\":\"$key\",\"img\":\"\",\"delete\":true}")
+    }
+
     /** 本地那份头图（只用于 App 内预览） */
     fun localIconFile(c: Context, key: String): File =
         File(File(c.filesDir, "heads"), "$key.jpg").apply { parentFile?.mkdirs() }

@@ -233,13 +233,7 @@ class MainActivity : Activity() {
                         pendingKey = key
                         openImagePicker()
                     }
-                    else -> {
-                        if (SettingsStore.iconKey(this) == key) {
-                            clearIcon()
-                        } else {
-                            toast("$key 当前没有自定义头图")
-                        }
-                    }
+                    else -> clearIcon(key)
                 }
             }
             .show()
@@ -320,16 +314,16 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun clearIcon() {
-        val key = SettingsStore.iconKey(this)
-        if (key.isEmpty()) {
-            toast("当前没有自定义头图")
+    /** 恢复某个型号的内置图（宿主那边那张 jpg 也会被删掉） */
+    private fun clearIcon(key: String) {
+        val had = SettingsStore.localIconFile(this, key).exists() || SettingsStore.iconKey(this) == key
+        if (!had) {
+            toast("$key 当前没有自定义头图")
             return
         }
-        SettingsStore.localIconFile(this, key).delete()
-        SettingsStore.clearIconKey(this)
+        SettingsStore.clearIcon(this, key)
         refreshIconRow()
-        toast("已恢复内置图（重启设备空间后生效）")
+        toast("已恢复 $key 的内置图（重启设备空间后生效）")
     }
 
     @Deprecated("纯 Activity 没有 registerForActivityResult，用旧式回调")

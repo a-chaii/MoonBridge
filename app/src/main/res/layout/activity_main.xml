@@ -491,6 +491,11 @@
                 app:cardCornerRadius="18dp"
                 app:cardElevation="1dp">
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
                                 <LinearLayout
                     android:id="@+id/rowRestart"
                     android:layout_width="match_parent"
@@ -566,6 +571,7 @@
                         android:text="›"
                         android:textSize="20sp"
                         android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

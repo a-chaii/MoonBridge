@@ -767,46 +767,63 @@ object PanelInjector {
      * ② 如果原图是异步加载的，加载回调回来会把我们的图盖掉，所以补几次延时复查。
      */
     private fun applyIcon(root: View) {
-        if (root.getTag(MARK_ICON) == true) return
-
         // ① 用户给这个型号设过自定义头图 → 优先用（文件在宿主 filesDir，同进程直接读）
         val custom = SettingsSync.customIcon(profile.key)
         val customBmp = custom?.let {
             runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull()
         }
-        // ② 没设过就只能用内置素材，而内置素材只有梦回 2 的一张，其他型号一律不动宿主原图
-        val bmp = customBmp ?: run {
-            if (profile.key != ICON_PROFILE) {
-                if (iconSkipLoggedFor != profile.key) {
-                    iconSkipLoggedFor = profile.key
-                    log("跳过换图标：内置素材只对应「$ICON_PROFILE」，当前档案=${profile.key}（可在模块里自定义头图）")
-                }
-                return
-            }
-            iconBitmap()
+        // 想显示的到底是哪一个：自定义 > 内置（只有梦回 2 有） > 宿主原图
+        val desired = when {
+            customBmp != null -> "custom:${profile.key}"
+            profile.key == ICON_PROFILE -> "builtin:${profile.key}"
+            else -> "orig"
         }
+        // ★ 标签记的是「当前贴的是哪一张」，不是「贴过了」——
+        //   否则用户点「恢复内置图」后，旧的自定义图会一直留在那儿（tag 还是 true 就一直早退）。
+        val cur = root.getTag(MARK_ICON) as? String
+        if (cur == desired) return
+
+        val all = ArrayList<ImageView>()
+        collectImageViews(root, all, 0)
+        val target = all.maxByOrNull { areaOf(it) }
+
+        if (desired == "orig") {
+            if (target != null) {
+                val orig = iconOriginals[target]
+                if (orig != null) {
+                    try {
+                        target.setImageDrawable(orig)
+                        log("图标已恢复宿主原图（${profile.key}）")
+                    } catch (t: Throwable) {
+                    }
+                }
+            }
+            root.setTag(MARK_ICON, desired)
+            return
+        }
+
+        val bmp = customBmp ?: iconBitmap()
         if (bmp == null) {
             log("图标数据不可用，跳过替换")
             return
         }
-        // 先排查结构再取图：这样即使图有问题，日志里也有树可以看
-        val all = ArrayList<ImageView>()
-        collectImageViews(root, all, 0)
         log(
             "pos0 图标排查: ImageView=${all.size} 来源=${if (customBmp != null) "自定义" else "内置"} " +
                 "树=${describeTree(root, 0)}"
         )
-        if (all.isEmpty()) {
+        if (target == null) {
             log("pos0 没有 ImageView —— 图标可能是自定义 View 自己画的，换成 hook onDraw")
             return
         }
-        // 面积最大的那个就是产品图（小的是箭头/角标之类）
-        val target = all.maxByOrNull { areaOf(it) } ?: return
-        root.setTag(MARK_ICON, true)
+        root.setTag(MARK_ICON, desired)
         installIcon(target, bmp)
     }
 
+    private val iconOriginals = java.util.WeakHashMap<ImageView, android.graphics.drawable.Drawable?>()
+
     private fun installIcon(iv: ImageView, bmp: Bitmap) {
+        // 第一次替换前把宿主自己的图存下来，「恢复内置图」要还回去
+        if (!iconOriginals.containsKey(iv)) iconOriginals[iv] = iv.drawable
         fun put(logIt: Boolean) {
             try {
                 iv.setImageBitmap(bmp)
