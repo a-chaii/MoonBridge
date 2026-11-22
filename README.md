@@ -69,8 +69,10 @@ cd moonbridge
 
 ## 致谢
 
-- [FxxkMoondrop](https://github.com/bqj6666/FxxkMoondrop)（GPL-3.0）—— 本项目的协议实现与
-  型号档案思路参考自该项目，详见 [THIRD_PARTY.md](THIRD_PARTY.md)
+- [FxxkMoondrop](https://github.com/bqj6666/FxxkMoondrop)（GPL-3.0）
+  —— 本项目的**型号档案（ANC 档位映射、ANC_V2 六槽、DC 增益/LED）、GAIA 命令常量与
+  回包语义、能力位图解析，以及「LE 地址缓存闭环」的思路**参考自该项目；
+  代码以 Kotlin 重写，未整文件复制。逐项对应关系见 [THIRD_PARTY.md](THIRD_PARTY.md)
 - 参考实现中已公开的 GAIA 协议实测记录
 
 ## 许可证
