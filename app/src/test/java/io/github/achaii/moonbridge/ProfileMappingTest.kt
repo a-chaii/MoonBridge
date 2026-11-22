@@ -177,6 +177,20 @@ class ProfileMappingTest {
     }
 
     @Test
+    fun spaceTravel2Ultra_isNotSwallowedByST2() {
+        // 名字里都带 "SPACE TRAVEL 2"，必须长 key 优先命中 Ultra
+        val ultra = MoondropProfile.of("MOONDROP SPACE TRAVEL 2 ULTRA")!!
+        assertEquals("SPACE TRAVEL 2 ULTRA", ultra.key)
+        assertArrayEquals(intArrayOf(1, 2, 3, 4), ultra.setMap)
+        assertFalse(ultra.hasGain)
+
+        val st2 = MoondropProfile.of("MOONDROP SPACE TRAVEL 2")!!
+        assertEquals("SPACE TRAVEL 2", st2.key)
+        assertArrayEquals(intArrayOf(1, 2, 4, 3), st2.setMap)
+        assertTrue(st2.hasGain)
+    }
+
+    @Test
     fun ancV1_mapsAsUpstream() {
         // 上游 GaiaCommands.ancDevFromUi：ANC_V1 只有「关 / 降噪」，ui0→0、其余→1
         assertEquals(0, MoondropProfile.v1DevForUi(0))

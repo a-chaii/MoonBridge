@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.achaii.moonbridge"
         minSdk = 24
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.9.0"
+        versionCode = 21
+        versionName = "0.9.1"
         vectorDrawables {
             useSupportLibrary = true
         }
