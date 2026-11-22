@@ -41,6 +41,13 @@ object SettingsSync {
     @Volatile
     private var cachedFast = false
 
+    /** 卡片显示偏好：是否显示「抗风噪」档 / 「增益」块，默认都显示 */
+    @Volatile
+    private var cachedWind = true
+
+    @Volatile
+    private var cachedGain = true
+
     @Volatile
     private var cachedMtime = -1L
 
@@ -56,8 +63,10 @@ object SettingsSync {
                 writeFile(app, json)
                 cachedPopup = o.optBoolean("autoPopup", true)
                 cachedFast = o.optBoolean("fastPopup", false)
+                cachedWind = o.optBoolean("showWind", true)
+                cachedGain = o.optBoolean("showGain", true)
                 cachedMtime = settingsFile(app).lastModified()
-                log("设置已更新：自动弹窗=$cachedPopup 提速弹窗=$cachedFast")
+                log("设置已更新：弹窗=$cachedPopup 提速=$cachedFast 抗风噪=$cachedWind 增益=$cachedGain")
                 // 顺手把「要不要常驻扫描」告诉 GMS 那边（它在另一个进程，读不到这份文件）
                 sendFastConfig(app)
             } catch (t: Throwable) {
@@ -99,16 +108,34 @@ object SettingsSync {
 
     /** 提速弹窗是否启用（默认 false） */
     fun fastPopup(): Boolean {
-        val c = ctx ?: return false
+        reloadIfChanged()
+        return cachedFast
+    }
+
+    /** 卡片里是否显示「抗风噪」档（默认 true） */
+    fun showWind(): Boolean {
+        reloadIfChanged()
+        return cachedWind
+    }
+
+    /** 卡片里是否显示「增益」块（默认 true） */
+    fun showGain(): Boolean {
+        reloadIfChanged()
+        return cachedGain
+    }
+
+    /** 文件变了才重读一次（四个开关一起刷新，避免各读各的） */
+    private fun reloadIfChanged() {
+        val c = ctx ?: return
         val f = settingsFile(c)
         val mt = runCatching { f.lastModified() }.getOrDefault(0L)
-        if (f.exists() && mt != cachedMtime) {
-            cachedMtime = mt
-            val o = runCatching { JSONObject(f.readText()) }.getOrNull()
-            cachedPopup = o?.optBoolean("autoPopup", true) ?: true
-            cachedFast = o?.optBoolean("fastPopup", false) ?: false
-        }
-        return cachedFast
+        if (!f.exists() || mt == cachedMtime) return
+        cachedMtime = mt
+        val o = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return
+        cachedPopup = o.optBoolean("autoPopup", true)
+        cachedFast = o.optBoolean("fastPopup", false)
+        cachedWind = o.optBoolean("showWind", true)
+        cachedGain = o.optBoolean("showGain", true)
     }
 
     /**

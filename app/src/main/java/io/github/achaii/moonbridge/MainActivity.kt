@@ -26,6 +26,8 @@ class MainActivity : Activity() {
 
     private lateinit var switchPopup: MaterialSwitch
     private lateinit var switchFast: MaterialSwitch
+    private lateinit var switchWind: MaterialSwitch
+    private lateinit var switchGain: MaterialSwitch
     private lateinit var tvIconState: TextView
     private lateinit var ivIconPreview: ImageView
 
@@ -43,6 +45,8 @@ class MainActivity : Activity() {
 
         switchPopup = findViewById(R.id.switchPopup)
         switchFast = findViewById(R.id.switchFast)
+        switchWind = findViewById(R.id.switchWind)
+        switchGain = findViewById(R.id.switchGain)
         tvIconState = findViewById(R.id.tvIconState)
         ivIconPreview = findViewById(R.id.ivIconPreview)
 
@@ -93,6 +97,20 @@ class MainActivity : Activity() {
                 .setPositiveButton(R.string.ok, null)
                 .show()
         }
+        // 卡片显示偏好
+        switchWind.isChecked = SettingsStore.showWind(this)
+        switchWind.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setShowWind(this, checked)
+            toast(if (checked) "卡片里会显示抗风噪" else "已隐藏抗风噪这一档")
+        }
+        switchGain.isChecked = SettingsStore.showGain(this)
+        switchGain.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setShowGain(this, checked)
+            toast(if (checked) "卡片里会显示增益" else "已隐藏增益菜单")
+        }
+
+        findViewById<View>(R.id.rowRestart).setOnClickListener { restartHost() }
+
         findViewById<View>(R.id.rowDebug).setOnClickListener {
             startActivity(Intent(this, DebugActivity::class.java))
         }
@@ -252,6 +270,26 @@ class MainActivity : Activity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** 重启设备空间进程：新设置/新代码要它重新加载才生效（走 su，失败就说明情况） */
+    private fun restartHost() {
+        toast("正在重启设备空间…")
+        Thread {
+            val ok = try {
+                val p = ProcessBuilder("su", "-c", "am force-stop com.heytap.mydevices")
+                    .redirectErrorStream(true)
+                    .start()
+                p.waitFor()
+                p.exitValue() == 0
+            } catch (t: Throwable) {
+                false
+            }
+            runOnUiThread {
+                if (ok) toast("已停止 com.heytap.mydevices，下次打开会重新加载模块")
+                else toast("没有拿到 root 权限，请手动在系统里停止「设备空间」")
+            }
+        }.start()
+    }
 
     /** 取主题色（深浅色都跟着系统走，不写死） */
     private fun themeColor(attr: Int): Int {

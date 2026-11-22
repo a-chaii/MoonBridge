@@ -27,6 +27,8 @@ object SettingsStore {
     private const val PREFS = "moonbridge"
     private const val K_POPUP = "autoPopup"
     private const val K_FAST = "fastPopup"
+    private const val K_WIND = "showWind"
+    private const val K_GAIN = "showGain"
     private const val K_ICON_KEY = "iconKey"
 
     /** 头图最长边，超过就缩 —— 广播有 1MB 上限，也免得注入端内存吃紧 */
@@ -42,6 +44,22 @@ object SettingsStore {
 
     fun setFastPopup(c: Context, on: Boolean) {
         prefs(c).edit().putBoolean(K_FAST, on).apply()
+        pushSettings(c)
+    }
+
+    /** 卡片里是否显示「抗风噪」这一档（有些型号/固件抗风噪体验差，用户可以选择不看到它） */
+    fun showWind(c: Context): Boolean = prefs(c).getBoolean(K_WIND, true)
+
+    fun setShowWind(c: Context, on: Boolean) {
+        prefs(c).edit().putBoolean(K_WIND, on).apply()
+        pushSettings(c)
+    }
+
+    /** 卡片里是否显示「增益」那一块 */
+    fun showGain(c: Context): Boolean = prefs(c).getBoolean(K_GAIN, true)
+
+    fun setShowGain(c: Context, on: Boolean) {
+        prefs(c).edit().putBoolean(K_GAIN, on).apply()
         pushSettings(c)
     }
 
@@ -67,7 +85,12 @@ object SettingsStore {
         File(File(c.filesDir, "heads"), "$key.jpg").apply { parentFile?.mkdirs() }
 
     fun pushSettings(c: Context) {
-        val json = "{\"autoPopup\":${autoPopup(c)}}"
+        val json = "{" +
+            "\"autoPopup\":${autoPopup(c)}," +
+            "\"fastPopup\":${fastPopup(c)}," +
+            "\"showWind\":${showWind(c)}," +
+            "\"showGain\":${showGain(c)}" +
+            "}"
         send(c, ACT_SETTINGS, json)
     }
 

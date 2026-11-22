@@ -30,4 +30,10 @@
     <string name="ok">好</string>
     <string name="feature_fast_title">提速弹窗</string>
     <string name="feature_fast_desc">开盖就被发现：借 GMS 常驻扫描，在蓝牙连上之前弹出卡片（需要 GMS 作用域；没开或 GMS 残缺时，仍会在连接后弹）</string>
+    <string name="feature_wind_title">显示抗风噪</string>
+    <string name="feature_wind_desc">卡片里是否出现「抗风噪」这一档（部分固件这一档体验一般，可以藏起来）</string>
+    <string name="feature_gain_title">显示增益菜单</string>
+    <string name="feature_gain_desc">卡片里是否出现「低 / 中 / 高」增益选择（型号不支持时本来就不会显示）</string>
+    <string name="debug_restart">重启设备空间进程</string>
+    <string name="debug_restart_desc">强制停止 com.heytap.mydevices，让新设置与新代码立刻生效（需要 root）</string>
 </resources>

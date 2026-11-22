@@ -985,6 +985,8 @@ object PanelInjector {
         // 胶囊按「本型号实际支持的 UI 档位」生成（档案里 setMap = -1 的槽位直接不出现）。
         // 例如知更鸟只有降噪/透传两档，就只长两颗；GA2 四档全有。
         for (ui in MoondropProfile.supportedUi(profile, ancV2Path())) {
+            // 用户可以在模块设置里隐藏「抗风噪」这一档（部分固件抗风噪体验一般）
+            if (ui == 3 && !SettingsSync.showWind()) continue
             val chip = TextView(c).apply {
                 text = modeName(ui)
                 textSize = 13f
@@ -1070,7 +1072,7 @@ object PanelInjector {
 
         // ── 扩展设备控制：增益（低/中/高）与指示灯（来自上游 DcProfile） ──
         //    DcProfile 里没写的型号（如知更鸟）这两块整行不出现，免得出现点了没反应的按钮。
-        if (profile.hasGain) {
+        if (profile.hasGain && SettingsSync.showGain()) {
             val gainHeader = TextView(c).apply {
                 text = "增益"
                 textSize = 13f
