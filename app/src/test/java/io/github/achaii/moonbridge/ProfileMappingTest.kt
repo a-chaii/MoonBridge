@@ -182,7 +182,7 @@ class ProfileMappingTest {
         val ultra = MoondropProfile.of("MOONDROP SPACE TRAVEL 2 ULTRA")!!
         assertEquals("SPACE TRAVEL 2 ULTRA", ultra.key)
         assertArrayEquals(intArrayOf(1, 2, 3, 4), ultra.setMap)
-        assertFalse(ultra.hasGain)
+        assertTrue(ultra.hasGain)
 
         val st2 = MoondropProfile.of("MOONDROP SPACE TRAVEL 2")!!
         assertEquals("SPACE TRAVEL 2", st2.key)

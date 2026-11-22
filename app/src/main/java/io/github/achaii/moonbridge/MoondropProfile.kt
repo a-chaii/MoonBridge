@@ -49,7 +49,13 @@ object MoondropProfile {
         //   所以以前 Ultra 会被**静默当成 2**、套用 2 的实测码（透传/抗风可能正好对调）。
         //   现在单独列一条：映射走协议名义值（和上游对未收录型号的处理一致），增益/LED 不宣称支持，
         //   至少不会把错的码发给它；等有真机日志再补实测映射。
-        Profile("SPACE TRAVEL 2 ULTRA", intArrayOf(1, 2, 3, 4)),
+        Profile(
+            "SPACE TRAVEL 2 ULTRA", intArrayOf(1, 2, 3, 4),
+            // 用户确认 Ultra 支持增益；方向（低/中/高 ↔ 0/1/2）暂无实测，
+            // 先按同族（太空漫游 2）的反向 [2,1,0]，若真机上「低/高」反了改成 [0,1,2] 即可。
+            // 卡片是否显示仍以设备自报的 F_DAC_GAIN 位为准，这里只影响兜底与档位映射。
+            hasGain = true, hasLed = false, gainMap = intArrayOf(2, 1, 0)
+        ),
         // 太空漫游 2 —— 同一套映射；增益反向（实测 0=高 / 2=低）
         Profile(
             "SPACE TRAVEL 2", intArrayOf(1, 2, 4, 3), intArrayOf(0, 1, 2, 3),
