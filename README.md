@@ -31,7 +31,7 @@
 - 空间音频相关的档位命名以本机固件实测为准，与其他型号可能不一致
 
 ## 下载
-从 [**Releases**](https://github.com/a-chaii/MoonBridge/releases/latest) 下载最新 APK（`MoonBridge-x.y.z.apk`），或者直接取仓库内 [`apk/`](apk) 目录里的同名文件（两份是同一个包，校验值见对应 `.md5`）。
+从 [**Releases**](https://github.com/a-chaii/MoonBridge/releases/latest) 下载最新 APK（`MoonBridge-x.y.z.apk`）。
 
 ## 安装
 1. 设备已 Root 并安装 **LSPosed**（本模块工作在 `com.heytap.mydevices` 进程内）
