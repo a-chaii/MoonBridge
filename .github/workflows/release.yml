@@ -1,0 +1,96 @@
+name: Release
+
+# 打标签即发版：push 一个 v* 标签，自动编译并把 APK 挂到 Release
+# 也可以在 Actions 页面手动触发（workflow_dispatch），需要填一个已存在的标签名
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布/更新的标签（例如 v0.9.5，需已存在）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 SDK 组件（compileSdk 35）
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: 安装 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # 仓库里的 gradle-wrapper.properties 没有 distributionUrl（本地是 Proot 环境手动装的），
+          # 所以 CI 不依赖 wrapper，直接用指定版本
+          gradle-version: '9.1.0'
+
+      - name: 单元测试
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: 编译 APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: 读取版本号
+        id: ver
+        run: |
+          VN=$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          VC=$(grep -m1 'versionCode' app/build.gradle.kts | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          echo "name=$VN" >> "$GITHUB_OUTPUT"
+          echo "code=$VC" >> "$GITHUB_OUTPUT"
+          echo "版本：$VN ($VC)"
+
+      - name: 整理产物（重命名 + md5）
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk "out/MoonBridge-${{ steps.ver.outputs.name }}.apk"
+          cd out
+          md5sum *.apk > "MoonBridge-${{ steps.ver.outputs.name }}.apk.md5"
+          ls -lh
+
+      - name: 发布到 Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+          name: MoonBridge ${{ steps.ver.outputs.name }}
+          body: |
+            **MoonBridge ${{ steps.ver.outputs.name }}**（versionCode ${{ steps.ver.outputs.code }}）
+
+            由 GitHub Actions 自动构建，APK 为 debug 签名，仅供自用/测试。
+
+            ### 安装
+            1. 设备已 Root 并安装 **LSPosed**
+            2. 安装本 APK
+            3. LSPosed 中启用 **MoonBridge**，作用域只勾 `设备空间 / com.heytap.mydevices`
+            4. 重启设备，或执行 `su -c am force-stop com.heytap.mydevices`
+
+            ### 反馈
+            请附 LSPosed 日志（过滤 `MoonBridge`）、耳机型号、ColorOS 版本；**不要**附 MAC 地址。
+            完整说明见 [README](https://github.com/${{ github.repository }}#readme)。
+          files: |
+            out/MoonBridge-*.apk
+            out/MoonBridge-*.apk.md5
+          fail_on_unmatched_files: true
+          generate_release_notes: false

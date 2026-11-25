@@ -1446,6 +1446,7 @@ object PanelInjector {
             }
             // ★ 官方时序（之前缺的就是这一段）：连接 → 阶梯探测 → 1200ms 前置等待 → 才允许下发控制
             handshake()
+            logAncDiag("点击前握手后")
 
             val dev = devForMode(ui)
             if (dev < 0) {
@@ -1525,8 +1526,30 @@ object PanelInjector {
         try {
             if (!ensureLink(ctx)) return
             handshake()
+            logAncDiag("预热握手后")
         } catch (t: Throwable) {
             log("预热失败: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    /**
+     * 一条能把「为什么点了没反应」说清楚的诊断行。
+     * 型号档案、实际路径、支持的 UI 档位、以及真正会发出去的设备码，一次全打出来。
+     */
+    private fun logAncDiag(stage: String) {
+        try {
+            val p = profile
+            val f = ancFeature()
+            val modes = supportedModes()
+            val devs = modes.joinToString(",") { "$it→${devForMode(it)}" }
+            val v2 = p.ancV2Set?.joinToString(",") ?: "无档案(恒等)"
+            log(
+                "$stage：型号=${p.key} 档案hint=0x${"%02X".format(p.ancHint)}" +
+                    " 路径=0x${"%02X".format(f)} 能探到features=[${client.features.sorted().joinToString(",")}]" +
+                    " 档位=$devs AC-setMap=${p.setMap.joinToString(",")} V2-setMap=$v2"
+            )
+        } catch (t: Throwable) {
+            log("诊断日志失败: ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 

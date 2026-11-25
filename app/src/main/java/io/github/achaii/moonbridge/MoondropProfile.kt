@@ -119,6 +119,9 @@ object MoondropProfile {
      * @param ancV2 当前链路走的是否 ANC_V2（feature 0x20）；是则用 6 槽表，否则 4 槽
      */
     fun supportedUi(p: Profile, ancV2: Boolean = false): IntArray {
+        // ANC_V2 且型号没有 V2 档案：照上游只宣告基础 4 档（0..3），映射走恒等。
+        // 自适应(4)/直播(5) 属于固件新增能力，无档案时宣告出去就是「点了没反应」的死按钮。
+        if (ancV2 && p.ancV2Set == null) return intArrayOf(0, 1, 2, 3)
         val map = if (ancV2) p.ancV2Set else null
         val n = map?.size ?: 4
         val out = ArrayList<Int>(n)
@@ -128,10 +131,15 @@ object MoondropProfile {
         }
         return out.toIntArray()
     }
-
     /** UI 档位 → 设备码；-1 = 不支持 */
     fun devForUi(p: Profile, ui: Int, ancV2: Boolean = false): Int {
-        p.ancV2Set?.let { if (ancV2) return it.getOrNull(ui) ?: -1 }
+        if (ancV2) {
+            p.ancV2Set?.let { return it.getOrNull(ui) ?: -1 }
+            // 上游 GaiaCommands.ancDevFromUi：ANC_V2 无档案 → **恒等映射**（ui 即 dev，0..5），
+            // 超范围返回 -1 拒绝发送。以前这里会掉到下面 4 槽 setMap，把 1/2/3/4 发给 V2 设备，
+            // 于是「关」变成自适应、「降噪」变成别的档 —— 按钮在，档位全错，看着就是「控制无效」。
+            return if (ui in 0..5) ui else -1
+        }
         return p.setMap.getOrNull(ui) ?: -1
     }
 
@@ -142,11 +150,9 @@ object MoondropProfile {
                 val i = m.indexOf(dev)
                 if (i >= 0) return i
             }
-            p.ancV2Set?.let { m ->
-                val i = m.indexOf(dev)
-                if (i >= 0) return i
-            }
-            return -1
+            // 上游 GaiaCommands.ancUiFromDev：无 V2 档案时保持恒等（官方 AncV2Handler 0-5 直传）。
+            // 以前这里直接 -1，导致 V2 设备的状态回报一律认不出，卡片高亮永远对不上。
+            return if (dev in 0..5) dev else -1
         }
         p.getMap?.let { m ->
             val i = m.indexOf(dev)

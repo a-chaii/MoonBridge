@@ -210,4 +210,23 @@ class ProfileMappingTest {
         assertEquals(4, MoondropProfile.uiForDev(p, 1, ancV2 = true))
         assertEquals(-1, MoondropProfile.devForUi(p, 5, ancV2 = true))
     }
+
+    @Test
+    fun ancV2_withoutProfile_isIdentityMapping() {
+        // 上游 GaiaCommands.ancDevFromUi / ancUiFromDev：ANC_V2 无型号档案 → 恒等（ui 即 dev）
+        // 之前这里会掉到 4 槽 AC setMap，把 1/2/3/4 发给 V2 设备 —— 档位全错，表现得像“控制无效”
+        val ultra = MoondropProfile.of("SPACE TRAVEL 2 ULTRA")!!
+        for (ui in 0..5) {
+            assertEquals(ui, MoondropProfile.devForUi(ultra, ui, ancV2 = true))
+        }
+        for (dev in 0..5) {
+            assertEquals(dev, MoondropProfile.uiForDev(ultra, dev, ancV2 = true))
+        }
+        // 无档案时只宣告基础 4 档，不长出「自适应 / 直播」死按钮
+        assertArrayEquals(intArrayOf(0, 1, 2, 3), MoondropProfile.supportedUi(ultra, ancV2 = true))
+        // AC（AudioCuration）路径不受影响，仍按档案 setMap
+        assertEquals(1, MoondropProfile.devForUi(ultra, 0))
+        assertEquals(4, MoondropProfile.devForUi(ultra, 3))
+        assertArrayEquals(intArrayOf(0, 1, 2, 3), MoondropProfile.supportedUi(ultra))
+    }
 }
