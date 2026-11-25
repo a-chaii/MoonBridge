@@ -56,7 +56,7 @@ cd moonbridge
 | 型号 | 状态 |
 |---|---|
 | Golden Ages 2（梦回 2） | 实机验证 |
-| Space Travel 2 Ultra | … |
+| Space Travel 2 Ultra | 实测不可用…在修 |
 | 其他水月雨型号 | 按协议推断，欢迎反馈日志 |
 
 > 反馈时请附：LSPosed 日志（过滤 `MoonBridge`）、耳机型号、ColorOS 版本。
