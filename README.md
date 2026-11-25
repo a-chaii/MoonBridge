@@ -30,10 +30,12 @@
 - 型号映射中「理论上支持」的部分按协议推断，尚未逐型号实机验证
 - 空间音频相关的档位命名以本机固件实测为准，与其他型号可能不一致
 
-## 安装
+## 下载
+从 [**Releases**](https://github.com/a-chaii/MoonBridge/releases/latest) 下载最新 APK（`MoonBridge-x.y.z.apk`）。仓库里只有源码，安装包都在 Releases 页面。
 
+## 安装
 1. 设备已 Root 并安装 **LSPosed**（本模块工作在 `com.heytap.mydevices` 进程内）
-2. 安装 APK
+2. 安装上面下载的 APK
 3. 在 LSPosed 管理器里启用 **MoonBridge**，作用域勾选 `设备空间 / com.heytap.mydevices`
 4. 重启设备（或强制停止 `com.heytap.mydevices`）
 5. 连上耳机，打开设备卡片，卡片内会出现控制面板
